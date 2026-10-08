@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "Delivery Assistant",
+  "version": "19.0",
+  "description": "Prefix-Based Smart Routing (Chapar vs Post) + Captcha Ready",
+  "permissions": [
+    "storage",
+    "offscreen",
+    "activeTab",
+    "tabs",
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "host_permissions": [
+    "*://panel.automoby.ir/*",
+    "*://portal.chaparnet.com/*",
+    "*://*.chaparnet.com/*",
+    "*://app.krch.ir/*",
+    "*://tracking.post.ir/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://panel.automoby.ir/*"],
+      "js": ["injected-main.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["*://panel.automoby.ir/*"],
+      "js": ["ui-render.js", "shortcuts.js", "content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://tracking.post.ir/*"],
+      "js": ["iran-post.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://portal.chaparnet.com/*"],
+      "js": ["chapar-portal.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["styles.css", "injected-main.js"],
+      "matches": ["*://panel.automoby.ir/*"]
+    }
+  ]
+}
