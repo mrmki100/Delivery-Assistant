@@ -317,8 +317,9 @@
 /* --- Modal Content --- */
 .cx-modal {
     background: var(--cx-bg-primary);
-    width: 480px;
-    max-width: 90vw;
+    width: 620px;
+    max-width: min(620px, 94vw);
+    box-sizing: border-box;
     border-radius: 16px;
     box-shadow: var(--cx-shadow-modal);
     overflow: hidden;
@@ -338,6 +339,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 12px;
     background: var(--cx-bg-secondary);
 }
 
@@ -857,14 +859,52 @@
 
 /* --- Delivery & Status Banners --- */
 .cx-delivery-banner {
-    padding: 10px 14px;
-    border-radius: 8px;
+    padding: 12px 16px;
+    border-radius: 10px;
     font-size: 13px;
-    margin-bottom: 14px;
+    line-height: 1.6;
+    margin-bottom: 16px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     border: 1px solid transparent;
+    box-sizing: border-box;
+    word-break: normal;
+    overflow-wrap: break-word;
+}
+
+.cx-banner-icon {
+    font-size: 18px;
+    line-height: 1;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+}
+
+.cx-banner-content {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    min-width: 0;
+}
+
+.cx-banner-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: normal;
+}
+
+.cx-banner-item.nowrap {
+    white-space: nowrap;
+}
+
+.cx-banner-sep {
+    opacity: 0.55;
+    user-select: none;
+    margin: 0 4px;
 }
 
 .cx-delivery-banner.cx-delivered {
@@ -887,6 +927,39 @@
     background: rgba(59, 130, 246, 0.15);
     color: #93c5fd;
     border-color: rgba(59, 130, 246, 0.3);
+}
+
+.cx-delivery-banner.cx-banner-danger {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #dc2626;
+}
+:host(.cx-dark) .cx-delivery-banner.cx-banner-danger {
+    background: rgba(239, 68, 68, 0.18);
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #f87171;
+}
+
+.cx-delivery-banner.cx-banner-warning {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.35);
+    color: #d97706;
+}
+:host(.cx-dark) .cx-delivery-banner.cx-banner-warning {
+    background: rgba(245, 158, 11, 0.18);
+    border-color: rgba(245, 158, 11, 0.4);
+    color: #fbbf24;
+}
+
+.cx-delivery-banner.cx-banner-cyan {
+    background: rgba(6, 182, 212, 0.12);
+    border-color: rgba(6, 182, 212, 0.35);
+    color: #0891b2;
+}
+:host(.cx-dark) .cx-delivery-banner.cx-banner-cyan {
+    background: rgba(6, 182, 212, 0.18);
+    border-color: rgba(6, 182, 212, 0.4);
+    color: #22d3ee;
 }
 
 /* Postal Handoff Banner */
@@ -1000,4 +1073,21 @@
     color: var(--cx-text-primary);
     font-weight: 700;
     word-break: break-word;
+}
+
+/* Responsive adjustments for smaller screens */
+@media (max-width: 520px) {
+    .cx-modal {
+        width: 95vw;
+        border-radius: 12px;
+    }
+    .cx-modal-header {
+        padding: 16px 18px;
+    }
+    .cx-modal-body {
+        padding: 16px 18px;
+    }
+    .cx-meta-grid {
+        grid-template-columns: 1fr;
+    }
 }

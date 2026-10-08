@@ -650,37 +650,67 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     const isDelivered = !!data.isDelivered;
 
     if (isDelivered) {
-        const deliveryTimePart = (data.deliveryDate || data.deliveredInfo) ? ` — زمان دقیق تحویل: <strong>${_esc(data.deliveryDate || data.deliveredInfo)}</strong>` : '';
-        const deliveryRecipientPart = data.deliveredTo ? ` به گیرنده: <strong>${_esc(data.deliveredTo)}</strong>` : '';
+        const deliveryTimePart = (data.deliveryDate || data.deliveredInfo)
+            ? `<span class="cx-banner-item nowrap"><span class="cx-banner-sep">—</span> زمان دقیق تحویل: <strong>${_esc(data.deliveryDate || data.deliveredInfo)}</strong></span>`
+            : '';
+        const deliveryRecipientPart = data.deliveredTo
+            ? `<span class="cx-banner-item"><span class="cx-banner-sep">—</span> به گیرنده: <strong>${_esc(data.deliveredTo)}</strong></span>`
+            : '';
         bannerHTML += `
             <div class="cx-delivery-banner cx-delivered" role="status" aria-label="تحویل موفق به گیرنده">
-                ✅ <strong>تحویل شد</strong>${deliveryTimePart}${deliveryRecipientPart}
+                <span class="cx-banner-icon">✅</span>
+                <div class="cx-banner-content">
+                    <span class="cx-banner-item"><strong>تحویل شد</strong></span>
+                    ${deliveryTimePart}
+                    ${deliveryRecipientPart}
+                </div>
             </div>
         `;
     } else if (statusInfo.category === 'RETURNED' || statusInfo.category === 'REJECTED') {
         bannerHTML += `
-            <div class="cx-delivery-banner" role="status" aria-label="${_esc(statusInfo.ariaLabel || statusInfo.labelFa)}" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #dc2626; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-weight: 600;">
-                ${statusInfo.icon} <strong>مرجوعی / عدم تحویل:</strong> ${_esc(statusInfo.labelFa)}
+            <div class="cx-delivery-banner cx-banner-danger" role="status" aria-label="${_esc(statusInfo.ariaLabel || statusInfo.labelFa)}">
+                <span class="cx-banner-icon">${statusInfo.icon}</span>
+                <div class="cx-banner-content">
+                    <span class="cx-banner-item"><strong>مرجوعی / عدم تحویل:</strong></span>
+                    <span class="cx-banner-item">${_esc(statusInfo.labelFa)}</span>
+                </div>
             </div>
         `;
     } else if (statusInfo.category === 'DELIVERY_PROBLEM' || statusInfo.category === 'DELIVERY_DELAYED' || statusInfo.category === 'DELIVERY_HOLD') {
         bannerHTML += `
-            <div class="cx-delivery-banner" role="status" aria-label="${_esc(statusInfo.ariaLabel || statusInfo.labelFa)}" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); color: #d97706; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-weight: 600;">
-                ${statusInfo.icon} <strong>نیاز به پیگیری / مشکل در توزیع:</strong> ${_esc(statusInfo.labelFa)}
+            <div class="cx-delivery-banner cx-banner-warning" role="status" aria-label="${_esc(statusInfo.ariaLabel || statusInfo.labelFa)}">
+                <span class="cx-banner-icon">${statusInfo.icon}</span>
+                <div class="cx-banner-content">
+                    <span class="cx-banner-item"><strong>نیاز به پیگیری / مشکل در توزیع:</strong></span>
+                    <span class="cx-banner-item">${_esc(statusInfo.labelFa)}</span>
+                </div>
             </div>
         `;
     } else if (statusInfo.category === 'OUT_FOR_DELIVERY') {
-        const estDeliveryText = data.maxDeliveryTime ? ` (حداکثر زمان تحویل: <strong>${_esc(data.maxDeliveryTime)}</strong>)` : '';
+        const estDeliveryText = data.maxDeliveryTime
+            ? `<span class="cx-banner-item nowrap"><span class="cx-banner-sep">|</span> حداکثر زمان تحویل: <strong>${_esc(data.maxDeliveryTime)}</strong></span>`
+            : '';
         bannerHTML += `
-            <div class="cx-delivery-banner" role="status" aria-label="${_esc(statusInfo.ariaLabel || statusInfo.labelFa)}" style="background: rgba(6, 182, 212, 0.12); border: 1px solid rgba(6, 182, 212, 0.35); color: #0891b2; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-weight: 600;">
-                ${statusInfo.icon} <strong>در دست توزیع:</strong> مرسوله تحویل پیک گردیده و در مسیر تحویل به گیرنده است.${estDeliveryText}
+            <div class="cx-delivery-banner cx-banner-cyan" role="status" aria-label="${_esc(statusInfo.ariaLabel || statusInfo.labelFa)}">
+                <span class="cx-banner-icon">${statusInfo.icon}</span>
+                <div class="cx-banner-content">
+                    <span class="cx-banner-item"><strong>در دست توزیع:</strong> مرسوله تحویل پیک گردیده و در مسیر تحویل به گیرنده است.</span>
+                    ${estDeliveryText}
+                </div>
             </div>
         `;
     } else {
-        const estDeliveryText = data.maxDeliveryTime ? ` | حداکثر زمان تحویل: <strong>${_esc(data.maxDeliveryTime)}</strong>` : '';
+        const estDeliveryText = data.maxDeliveryTime
+            ? `<span class="cx-banner-item nowrap"><span class="cx-banner-sep">|</span> حداکثر زمان تحویل: <strong>${_esc(data.maxDeliveryTime)}</strong></span>`
+            : '';
         bannerHTML += `
             <div class="cx-delivery-banner cx-in-transit" role="status" aria-label="${_esc(statusInfo.ariaLabel || statusInfo.labelFa)}">
-                ${statusInfo.icon} <strong>آخرین وضعیت:</strong> <strong>${_esc(statusInfo.labelFa)}</strong>${estDeliveryText}
+                <span class="cx-banner-icon">${statusInfo.icon}</span>
+                <div class="cx-banner-content">
+                    <span class="cx-banner-item"><strong>در حال توزیع / پیگیری</strong></span>
+                    <span class="cx-banner-item"><span class="cx-banner-sep">—</span> آخرین وضعیت: <strong>${_esc(statusInfo.labelFa)}</strong></span>
+                    ${estDeliveryText}
+                </div>
             </div>
         `;
     }
