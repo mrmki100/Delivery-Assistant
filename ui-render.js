@@ -988,7 +988,12 @@ function renderAuthErrorModal() {
     const root = getExtensionRoot();
     
     const existingModal = root.querySelector('.cx-modal-overlay');
-    if (existingModal) existingModal.remove();
+    if (existingModal) {
+        if (existingModal._cxEscHandler) {
+            document.removeEventListener('keydown', existingModal._cxEscHandler);
+        }
+        existingModal.remove();
+    }
 
     const overlay = document.createElement('div');
     overlay.className = 'cx-modal-overlay';
@@ -1061,17 +1066,17 @@ function renderPhoneListModal(waybills, phone, customerName) {
                     <span>📋 آخرین وضعیت: ${_esc(wInfo.labelFa)} <small style="opacity:0.7">(${_esc(w.status)})</small></span>
                 </div>
                 <div style="text-align: left; margin-top: 10px;">
-                    <button class="cx-btn cx-btn-primary cx-btn-small cx-waybill-select-btn" data-waybill="${_esc(w.waybill)}">مشاهده جزئیات</button>
+                    <button class="cx-btn cx-btn-primary cx-btn-small cx-waybill-select-btn" data-waybill="${_esc(w.waybill)}" aria-label="مشاهده جزئیات بارنامه ${_esc(w.waybill)}">مشاهده جزئیات</button>
                 </div>
             </div>
         `;
     });
 
     overlay.innerHTML = `
-        <div class="cx-modal">
+        <div class="cx-modal" role="dialog" aria-modal="true" aria-labelledby="cx-title-select-waybill">
             <div class="cx-modal-header">
                 <div>
-                    <h2 class="cx-modal-title">انتخاب بارنامه</h2>
+                    <h2 class="cx-modal-title" id="cx-title-select-waybill">انتخاب بارنامه</h2>
                     <div class="cx-modal-subtitle">موبایل: ${_esc(phone)} | ${_esc(customerName)}</div>
                 </div>
                 <div class="cx-status-badge badge-warning">${waybills.length} مورد یافت شد</div>
@@ -1232,11 +1237,11 @@ async function renderShortcutSettingsModal(onSave) {
     const overlay = document.createElement('div');
     overlay.className = 'cx-modal-overlay';
     overlay.innerHTML = `
-        <div class="cx-modal" style="max-width: 500px;">
+        <div class="cx-modal" role="dialog" aria-modal="true" aria-labelledby="cx-settings-title" style="max-width: 500px;">
             <div class="cx-modal-header">
                 <div>
-                    <h2 class="cx-modal-title">âš™ï¸ ØªÙ†Ø¸ÛŒÙ…Ø§Øª Ù…ÛŒØ§Ù†Ø¨Ø±Ù‡Ø§ÛŒ Ø§ØªÙˆÙ…ÙˆØ¨ÛŒ</h2>
-                    <div class="cx-modal-subtitle">Ø§Ù†ØªØ®Ø§Ø¨ Ø¨Ø®Ø´â€ŒÙ‡Ø§ÛŒ ÙØ¹Ø§Ù„ Ø¯Ø± Ù†ÙˆØ§Ø± Ø¯Ø³ØªÛŒØ§Ø± Ù‡ÙˆØ´Ù…Ù†Ø¯</div>
+                    <h2 class="cx-modal-title" id="cx-settings-title">⚙️ تنظیمات میانبرهای اتوموبی</h2>
+                    <div class="cx-modal-subtitle">انتخاب بخش‌های فعال در نوار دستیار هوشمند</div>
                 </div>
             </div>
             
@@ -1247,8 +1252,8 @@ async function renderShortcutSettingsModal(onSave) {
             </div>
             
             <div class="cx-modal-footer">
-                <button class="cx-btn cx-btn-secondary" id="cx-settings-cancel">Ø§Ù†ØµØ±Ø§Ù</button>
-                <button class="cx-btn cx-btn-primary" id="cx-settings-save">Ø°Ø®ÛŒØ±Ù‡ Ùˆ Ø§Ø¹Ù…Ø§Ù„</button>
+                <button class="cx-btn cx-btn-secondary" id="cx-settings-cancel">انصراف</button>
+                <button class="cx-btn cx-btn-primary" id="cx-settings-save">ذخیره و اعمال</button>
             </div>
         </div>
     `;

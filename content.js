@@ -19,6 +19,14 @@
 
     let activeCustomerName = '';
     let activeCustomerPhone = '';
+    let currentRoutingSeq = 0;
+
+    function toAsciiDigits(str) {
+        if (str == null) return '';
+        return String(str)
+            .replace(/[\u06F0-\u06F9]/g, d => String.fromCharCode(d.charCodeAt(0) - 0x06F0 + 48))
+            .replace(/[\u0660-\u0669]/g, d => String.fromCharCode(d.charCodeAt(0) - 0x0660 + 48));
+    }
 
     // ==========================================
     // 0. MAIN-WORLD SCRIPT INJECTION (FALLBACK)
@@ -110,7 +118,6 @@
     // Keep the panel alive (helps against React re-renders wiping the DOM)
     setInterval(() => {
         ensurePanelExists();
-        updateRowCacheFromDOM();
     }, 1000);
 
     // ==========================================
@@ -130,6 +137,12 @@
         try {
             const rows = document.querySelectorAll('.MuiDataGrid-row');
             if (!rows || rows.length === 0) return;
+
+            // Cap cache size to prevent memory leak
+            if (rowDataCache.size > 300) {
+                const keys = Array.from(rowDataCache.keys()).slice(0, 100);
+                keys.forEach(k => rowDataCache.delete(k));
+            }
 
             rows.forEach(row => {
                 const rowId = row.getAttribute('data-id') || row.getAttribute('data-rowindex');
@@ -211,8 +224,15 @@
     // Update cache immediately on initialization
     updateRowCacheFromDOM();
 
-    // Listen for scroll events on the window and scroll containers (passive, capture phase)
-    window.addEventListener('scroll', updateRowCacheFromDOM, { capture: true, passive: true });
+    // Throttled scroll listener to prevent main thread blocking
+    let scrollThrottleTimeout = null;
+    window.addEventListener('scroll', () => {
+        if (scrollThrottleTimeout) return;
+        scrollThrottleTimeout = setTimeout(() => {
+            scrollThrottleTimeout = null;
+            updateRowCacheFromDOM();
+        }, 150);
+    }, { capture: true, passive: true });
 
     // Observe DOM mutations to capture new rows and cells as they enter the grid
     let cacheDebounceTimeout = null;
@@ -351,11 +371,13 @@
         let phone = (fiberData && fiberData.phone) ? fiberData.phone : '';
         if (!phone) phone = extractData(rowFragments, FIELDS.phone);
         if (!phone && cached && cached.phone) phone = cached.phone;
+        phone = toAsciiDigits(phone).trim();
 
         // 2. Waybill / Barcode
         let waybill = (fiberData && fiberData.waybill) ? fiberData.waybill : '';
         if (!waybill) waybill = extractData(rowFragments, FIELDS.waybill);
         if (!waybill && cached && cached.waybill) waybill = cached.waybill;
+        waybill = toAsciiDigits(waybill).trim();
 
         // 3. Customer Name
         let name = (fiberData && fiberData.name) ? fiberData.name : '';
@@ -368,11 +390,13 @@
         let orderId = (fiberData && fiberData.orderId) ? fiberData.orderId : '';
         if (!orderId) orderId = extractData(rowFragments, FIELDS.order);
         if (!orderId && cached && cached.orderId) orderId = cached.orderId;
+        orderId = toAsciiDigits(orderId).trim();
 
         // 5. Parcel ID
         let parcelId = (fiberData && fiberData.parcelId) ? fiberData.parcelId : '';
         if (!parcelId) parcelId = extractData(rowFragments, ['id', 'parcelId']);
         if (!parcelId && cached && cached.parcelId) parcelId = cached.parcelId;
+        parcelId = toAsciiDigits(parcelId).trim();
 
         // Update the cache with any newly discovered fields for this row
         if (rowId) {
@@ -434,6 +458,10 @@
 
             newBtn.addEventListener('click', async (clickEvent) => {
                 clickEvent.preventDefault();
+                if (newBtn.disabled) return;
+
+                // Disable during in-flight action to prevent repeated click storms
+                newBtn.disabled = true;
 
                 // Always backup to clipboard just in case
                 if (navigator.clipboard) {
@@ -444,11 +472,15 @@
                 const originalText = newBtn.innerHTML;
                 newBtn.innerHTML = `<div class="cx-spinner"></div> در حال انتقال...`;
 
-                // Trigger Background Service Worker
-                await handleRoutingAction(filterType, value, isPostButton);
-
-                // Restore button text after action
-                setTimeout(() => newBtn.innerHTML = originalText, 800);
+                try {
+                    await handleRoutingAction(filterType, value, isPostButton, {
+                        name: activeCustomerName,
+                        phone: activeCustomerPhone
+                    });
+                } finally {
+                    newBtn.innerHTML = originalText;
+                    newBtn.disabled = false;
+                }
             });
         };
 
@@ -483,47 +515,59 @@
     // ==========================================
     // 4. THE API BRIDGE DISPATCHER
     // ==========================================
-    async function handleRoutingAction(filterType, value, isPostRoute) {
+    async function handleRoutingAction(filterType, value, isPostRoute, contextSnapshot = null) {
         if (isPostRoute) {
             // Task: Iran Post -> Tell background script to open Tab and prep storage
             chrome.runtime.sendMessage({
                 action: 'OPEN_POST_TAB',
                 query: value
             });
-        } else {
-            // Task: Chapar -> Tell background script to execute silent fetch
-            const response = await new Promise(resolve => {
-                chrome.runtime.sendMessage({
-                    action: 'FETCH_CHAPAR',
-                    type: filterType,
-                    query: value,
-                    phone: activeCustomerPhone,
-                    name: activeCustomerName
-                }, resolve);
-            });
+            return;
+        }
 
-            // Handle Response
-            if (!response || !response.success) {
-                if (response && response.error === 'AUTH_REQUIRED') {
-                    // Fire the Lock Screen Modal from ui-render.js
-                    if (typeof renderAuthErrorModal === 'function') {
-                        renderAuthErrorModal();
-                    } else {
-                        alert('لطفا وارد حساب چاپار شوید.');
-                    }
+        const thisSeq = ++currentRoutingSeq;
+        const targetValue = value;
+        const targetCustomerName = contextSnapshot?.name || activeCustomerName;
+        const targetPhone = contextSnapshot?.phone || activeCustomerPhone;
+
+        // Task: Chapar -> Tell background script to execute silent fetch
+        const response = await new Promise(resolve => {
+            chrome.runtime.sendMessage({
+                action: 'FETCH_CHAPAR',
+                type: filterType,
+                query: targetValue,
+                phone: targetPhone,
+                name: targetCustomerName
+            }, resolve);
+        });
+
+        // STALE CANCELLATION GUARD:
+        // If the user clicked another row or triggered another search while this request was in flight, discard!
+        if (thisSeq !== currentRoutingSeq) {
+            console.warn('[Delivery Assistant] Stale request discarded:', { thisSeq, currentRoutingSeq, targetValue });
+            return;
+        }
+
+        // Handle Response
+        if (!response || !response.success) {
+            if (response && response.error === 'AUTH_REQUIRED') {
+                if (typeof renderAuthErrorModal === 'function') {
+                    renderAuthErrorModal();
                 } else {
-                    alert('خطا در ارتباط با سرور چاپار: ' + (response?.error || 'Unknown Error'));
+                    alert('لطفا وارد حساب چاپار شوید.');
                 }
             } else {
-                // Route to the appropriate UI modal based on response type
-                if (response.isPhoneList) {
-                    if (typeof renderPhoneListModal === 'function') {
-                        renderPhoneListModal(response.data, value, activeCustomerName);
-                    }
-                } else {
-                    if (typeof renderTrackingModal === 'function') {
-                        renderTrackingModal(response.data, value, activeCustomerName);
-                    }
+                alert('خطا در ارتباط با سرور چاپار: ' + (response?.error || 'Unknown Error'));
+            }
+        } else {
+            // Route to the appropriate UI modal based on response type
+            if (response.isPhoneList) {
+                if (typeof renderPhoneListModal === 'function') {
+                    renderPhoneListModal(response.data, targetValue, targetCustomerName);
+                }
+            } else {
+                if (typeof renderTrackingModal === 'function') {
+                    renderTrackingModal(response.data, targetValue, targetCustomerName);
                 }
             }
         }
@@ -547,14 +591,20 @@
         (document.body || document.documentElement).appendChild(testBtn);
     }
     testBtn.addEventListener('click', async () => {
-        const query = document.documentElement.getAttribute('data-cx-test-query');
+        const rawQuery = document.documentElement.getAttribute('data-cx-test-query');
         const type = document.documentElement.getAttribute('data-cx-test-type') || 'ConsignmentNo';
         const name = document.documentElement.getAttribute('data-cx-test-name') || '';
+        
+        // Validate inputs before executing
+        const allowedTypes = ['ConsignmentNo', 'گیرنده'];
+        if (!allowedTypes.includes(type)) return;
+        
+        const query = toAsciiDigits(rawQuery || '').trim();
+        if (!/^[0-9a-zA-Z%_\-\+]{3,40}$/.test(query)) return;
+
         if (name) activeCustomerName = name;
-        if (query) {
-            await handleRoutingAction(type, query, false);
-            document.documentElement.setAttribute('data-cx-test-status', 'completed');
-        }
+        await handleRoutingAction(type, query, false, { name: activeCustomerName, phone: activeCustomerPhone });
+        document.documentElement.setAttribute('data-cx-test-status', 'completed');
     });
 
 })();

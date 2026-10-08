@@ -16,7 +16,8 @@
             // We found a task, clear it
             chrome.storage.local.remove(['chaparTrackingTask', 'chaparTrackingWaybill']);
             
-            if (internalId) {
+            if (internalId && /^\d+$/.test(String(internalId).trim())) {
+                const safeInternalId = String(internalId).trim();
                 // If we have the exact internal ID, we can directly trigger the waybill popup!
                 // We inject a script tag that polls for the xajax_DoPHP function
                 // since the portal is an SPA and might take time to initialize its xajax scripts.

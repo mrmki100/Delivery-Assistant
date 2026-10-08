@@ -9,11 +9,30 @@
 // 🐛 DEBUG LOGGING SYSTEM
 // ==========================================
 // To view these logs, go to chrome://extensions -> Click "service worker" under this extension.
+function maskPII(val) {
+    if (typeof val === 'string') {
+        return val.replace(/(09\d{2})\d{4}(\d{3})/g, '$1***$2');
+    }
+    if (val && typeof val === 'object') {
+        try {
+            const clone = Array.isArray(val) ? [...val] : { ...val };
+            if (clone.phone) clone.phone = maskPII(String(clone.phone));
+            if (clone.query && typeof clone.query === 'string' && clone.query.startsWith('09')) {
+                clone.query = maskPII(clone.query);
+            }
+            return clone;
+        } catch (e) {
+            return val;
+        }
+    }
+    return val;
+}
+
 function logDebug(title, data = null) {
     const timestamp = new Date().toLocaleTimeString();
-    console.log(`[🤖 CX Debug | ${timestamp}] ${title}`);
+    console.log(`[🤖 DeliveryAssistant | ${timestamp}] ${title}`);
     if (data) {
-        console.dir(data); // .dir is great for deeply nested JSON
+        console.dir(maskPII(data));
     }
 }
 
@@ -42,32 +61,48 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // Validate sender is from this extension
+    if (sender.id !== chrome.runtime.id) {
+        return false;
+    }
+    if (!message || typeof message !== 'object') {
+        return false;
+    }
+
     if (message.action === 'FETCH_CHAPAR') {
-        logDebug("1. Received FETCH_CHAPAR from UI", message);
+        logDebug("1. Received FETCH_CHAPAR from UI", { action: message.action, type: message.type });
         
         handleChaparFetch(message).then(response => {
-            logDebug("5. Final Response sent back to UI", response);
+            logDebug("5. Final Response sent back to UI", { success: response?.success });
             sendResponse(response);
+        }).catch(err => {
+            logDebug("FETCH_CHAPAR unhandled rejection", err.message);
+            sendResponse({ success: false, error: err.message || 'خطا در ارتباط با سرور' });
         });
         
         return true; // Keep message channel open for async sendResponse
     }
     
     if (message.action === 'OPEN_POST_TAB') {
-        handlePostTab(message.query).then(sendResponse);
+        handlePostTab(message.query)
+            .then(sendResponse)
+            .catch(err => sendResponse({ success: false, error: err.message }));
         return true; 
     }
     
     if (message.action === 'OPEN_CHAPAR_TAB') {
-        handleChaparTab(message.internalId, message.waybill).then(sendResponse);
+        handleChaparTab(message.internalId, message.waybill)
+            .then(sendResponse)
+            .catch(err => sendResponse({ success: false, error: err.message }));
         return true; 
     }
 
     if (message.action === 'OPEN_PUBLIC_CHAPAR_TAB') {
-        const query = encodeURIComponent(String(message.query || '').trim());
-        chrome.tabs.create({ url: `https://www.chaparnet.com/track/${query}` }).then(() => {
-            sendResponse({ success: true });
-        });
+        const cleanQuery = toAsciiDigits(String(message.query || '')).trim();
+        const query = encodeURIComponent(cleanQuery);
+        chrome.tabs.create({ url: `https://www.chaparnet.com/track/${query}` })
+            .then(() => sendResponse({ success: true }))
+            .catch(err => sendResponse({ success: false, error: err.message }));
         return true;
     }
 });
@@ -88,9 +123,59 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
  * when cell values contain \" (HTML attribute escapes). This tokenizer walks
  * character-by-character to correctly handle string boundaries and escapes.
  */
+
+/**
+ * Normalizes Persian and Arabic digits to ASCII [0-9].
+ */
+function toAsciiDigits(str) {
+    if (str == null) return '';
+    return String(str)
+        .replace(/[\u06F0-\u06F9]/g, d => String.fromCharCode(d.charCodeAt(0) - 0x06F0 + 48))
+        .replace(/[\u0660-\u0669]/g, d => String.fromCharCode(d.charCodeAt(0) - 0x0660 + 48));
+}
+
+/**
+ * Abortable fetch with a configurable timeout.
+ */
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const res = await fetch(url, { ...options, signal: controller.signal });
+        return res;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+/**
+ * In-memory short-lived cache (45s TTL) for shipment detail queries.
+ * Prevents redundant fetches to Chapar's PHP portal when operators re-inspect rows.
+ */
+const shipmentCache = new Map();
+function getCachedShipment(wb) {
+    if (!wb) return null;
+    const entry = shipmentCache.get(wb);
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp > 45000) {
+        shipmentCache.delete(wb);
+        return null;
+    }
+    return entry.data;
+}
+function setCachedShipment(wb, data) {
+    if (!wb || !data) return;
+    if (shipmentCache.size > 50) {
+        const firstKey = shipmentCache.keys().next().value;
+        shipmentCache.delete(firstKey);
+    }
+    shipmentCache.set(wb, { data, timestamp: Date.now() });
+}
+
 function parseSloppyJSON(rawText) {
-    // 0. Clean the raw text (remove BOM, trim whitespace)
+    if (!rawText || typeof rawText !== 'string') return null;
     let cleanText = rawText.replace(/^\uFEFF/, '').trim();
+    if (!cleanText) return null;
     
     // Fast path: try strict JSON.parse first
     try {
@@ -103,7 +188,6 @@ function parseSloppyJSON(rawText) {
             converted = tokenizeAndConvert(cleanText);
             return JSON.parse(converted);
         } catch (tokenError) {
-            // Log the region around the failure for debugging
             const posMatch = tokenError.message.match(/position (\d+)/);
             if (posMatch && converted) {
                 const pos = parseInt(posMatch[1]);
@@ -116,11 +200,13 @@ function parseSloppyJSON(rawText) {
 }
 
 /**
- * Character-by-character tokenizer that converts Chapar's JS-object-literal
+ * Enhanced character-by-character tokenizer that converts Chapar's JS-object-literal
  * format into valid JSON. Handles:
  *   - Single-quoted strings → double-quoted, with internal escapes fixed
- *   - Unquoted object keys → double-quoted
+ *   - Unquoted object keys → double-quoted, resilient to newlines before colon
  *   - Literal newlines inside and outside strings → removed/escaped
+ *   - Trailing commas before } and ] → eliminated
+ *   - Safe handling of \u not followed by 4 hex digits (e.g. \user)
  *   - Stray backslash escapes (\') → converted to just the character
  */
 function tokenizeAndConvert(input) {
@@ -135,48 +221,41 @@ function tokenizeAndConvert(input) {
         if (ch === "'") {
             out += '"';
             i++;
-            // Walk through the string contents until closing single quote
             while (i < len && input[i] !== "'") {
                 if (input[i] === '\\') {
-                    // Look at the next character after backslash
                     const next = input[i + 1];
                     if (next === "'") {
-                        // \' is invalid in JSON → emit just the apostrophe
                         out += "'";
                         i += 2;
                     } else if (next === '"') {
-                        // \" inside a single-quoted string (e.g. HTML attributes)
-                        // In our output (now double-quoted), we MUST keep this escaped
                         out += '\\"';
                         i += 2;
                     } else if (next === '\\') {
                         out += '\\\\';
                         i += 2;
                     } else if (next === 'n' || next === 'r' || next === 't' || next === 'b' || next === 'f') {
-                        // Valid JSON escapes, keep them
                         out += '\\' + next;
                         i += 2;
                     } else if (next === 'u') {
-                        // Unicode escape, keep as-is
-                        out += '\\u';
-                        i += 2;
+                        // Check if followed by 4 valid hex digits
+                        if (/^[0-9a-fA-F]{4}/.test(input.slice(i + 2, i + 6))) {
+                            out += '\\u';
+                            i += 2;
+                        } else {
+                            out += '\\\\u';
+                            i += 2;
+                        }
                     } else if (next === '/') {
-                        // \/ is valid in JSON
                         out += '\\/';
                         i += 2;
                     } else {
-                        // Stray backslash before unknown char (e.g. \x, \a, etc.)
-                        // Escape the backslash itself so JSON.parse doesn't choke
-                        out += '\\\\' + next;
+                        out += '\\\\' + (next || '');
                         i += 2;
                     }
                 } else if (input[i] === '"') {
-                    // Unescaped double quote inside a single-quoted string
-                    // Must escape it for our double-quoted output
                     out += '\\"';
                     i++;
                 } else if (input[i].charCodeAt(0) < 0x20) {
-                    // ANY control character (\n, \r, \t, \0, etc.) must be escaped for JSON
                     const code = input[i].charCodeAt(0);
                     if (code === 0x0A) out += '\\n';
                     else if (code === 0x0D) out += '\\r';
@@ -188,9 +267,8 @@ function tokenizeAndConvert(input) {
                     i++;
                 }
             }
-            // Closing single quote → emit closing double quote
             out += '"';
-            i++; // skip the closing '
+            i++; // skip closing '
             continue;
         }
         
@@ -203,21 +281,25 @@ function tokenizeAndConvert(input) {
                     const next = input[i + 1];
                     if (next === '"' || next === '\\' || next === '/' ||
                         next === 'b' || next === 'f' || next === 'n' || 
-                        next === 'r' || next === 't' || next === 'u') {
-                        // Valid JSON escape
+                        next === 'r' || next === 't') {
                         out += '\\' + next;
                         i += 2;
+                    } else if (next === 'u') {
+                        if (/^[0-9a-fA-F]{4}/.test(input.slice(i + 2, i + 6))) {
+                            out += '\\u';
+                            i += 2;
+                        } else {
+                            out += '\\\\u';
+                            i += 2;
+                        }
                     } else if (next === "'") {
-                        // \' is not valid JSON → emit just apostrophe
                         out += "'";
                         i += 2;
                     } else {
-                        // Stray backslash → escape it
                         out += '\\\\' + (next || '');
                         i += 2;
                     }
                 } else if (input[i].charCodeAt(0) < 0x20) {
-                    // ANY control character must be escaped for JSON
                     const code = input[i].charCodeAt(0);
                     if (code === 0x0A) out += '\\n';
                     else if (code === 0x0D) out += '\\r';
@@ -240,24 +322,31 @@ function tokenizeAndConvert(input) {
             continue;
         }
         
+        // --- Trailing comma elimination before } or ] ---
+        if (ch === ',') {
+            let nextNonWhiteIdx = i + 1;
+            while (nextNonWhiteIdx < len && (input[nextNonWhiteIdx] === ' ' || input[nextNonWhiteIdx] === '\t' || input[nextNonWhiteIdx] === '\r' || input[nextNonWhiteIdx] === '\n')) {
+                nextNonWhiteIdx++;
+            }
+            if (nextNonWhiteIdx < len && (input[nextNonWhiteIdx] === '}' || input[nextNonWhiteIdx] === ']')) {
+                i++;
+                continue;
+            }
+        }
+
         // --- Unquoted key detection ---
-        // After { or , (possibly with whitespace), an identifier followed by : is a key
         if (isIdentStart(ch) && isAfterKeyPosition(out)) {
-            // Read the full identifier
             let ident = '';
             while (i < len && isIdentChar(input[i])) {
                 ident += input[i];
                 i++;
             }
-            // Skip whitespace
-            while (i < len && (input[i] === ' ' || input[i] === '\t')) {
+            while (i < len && (input[i] === ' ' || input[i] === '\t' || input[i] === '\r' || input[i] === '\n')) {
                 i++;
             }
-            // If followed by ':', it's an object key → quote it
             if (i < len && input[i] === ':') {
                 out += '"' + ident + '"';
             } else {
-                // It's a bare value (like true, false, null) or something else
                 out += ident;
             }
             continue;
@@ -283,17 +372,14 @@ function isIdentChar(ch) {
 
 /** 
  * Checks if the most recent non-whitespace character in the output 
- * indicates we're in a position where an unquoted key could appear 
- * (after {, after , or at the very start of the input).
+ * indicates we're in a position where an unquoted key could appear.
  */
 function isAfterKeyPosition(output) {
-    // Walk backwards through output to find last non-whitespace char
     for (let j = output.length - 1; j >= 0; j--) {
         const ch = output[j];
-        if (ch === ' ' || ch === '\t') continue;
+        if (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\n') continue;
         return ch === '{' || ch === ',';
     }
-    // Empty output → could be start of object
     return true;
 }
 
@@ -306,7 +392,8 @@ function isAfterKeyPosition(output) {
  */
 function parseShamsiSortKey(dateStr) {
     if (!dateStr || typeof dateStr !== 'string') return 0;
-    const nums = dateStr.match(/\d+/g);
+    const cleanDate = toAsciiDigits(dateStr);
+    const nums = cleanDate.match(/\d+/g);
     if (!nums || nums.length < 3) return 0;
     const y = nums[0].padStart(4, '0');
     const m = nums[1].padStart(2, '0');
@@ -334,6 +421,53 @@ function stripHtml(str) {
  * Traces the actual delivery status and delivery date from live Chapar responses.
  * Never guesses or falls back to pickup date or registration date.
  */
+
+/**
+ * Rigorously checks delivery status from live Chapar responses.
+ * Negative guards prevent false positives (e.g. WA: عدم تحویل بدلیل آدرس یا تلفن اشتباه).
+ */
+function checkDeliveryStatus(portalStatus, popupData, historyLogs) {
+    if (popupData?.isDelivered) {
+        return {
+            isDelivered: true,
+            deliveryDate: popupData.deliveredInfo || null,
+            deliveredTo: popupData.receiver || null
+        };
+    }
+    
+    const st = String(portalStatus || '').trim();
+    const isNegative = st.includes('عدم تحویل') || st.includes('عدم') || st.includes('امتناع') || st.includes('برگشت') || st.includes('عودت');
+    if (!isNegative && (st === 'OK' || st.startsWith('OK ') || st.startsWith('OK(') || st.includes('سالم تحویل شد') || st.includes('تحویل شد'))) {
+        return {
+            isDelivered: true,
+            deliveryDate: st,
+            deliveredTo: null
+        };
+    }
+
+    if (Array.isArray(historyLogs) && historyLogs.length > 0) {
+        for (const log of historyLogs) {
+            const lst = String(log.status || '').trim();
+            if (lst.includes('عدم تحویل') || lst.includes('عدم') || lst.includes('امتناع') || lst.includes('برگشت') || lst.includes('عودت')) {
+                continue;
+            }
+            if (lst.includes('سالم تحویل شد') || lst.includes('تحویل شد') || lst === 'OK' || lst.startsWith('OK ') || lst.startsWith('OK(')) {
+                return {
+                    isDelivered: true,
+                    deliveryDate: log.date || null,
+                    deliveredTo: log.receiver || null
+                };
+            }
+        }
+    }
+
+    return {
+        isDelivered: false,
+        deliveryDate: null,
+        deliveredTo: null
+    };
+}
+
 function deriveDeliveryDate(orderData, historyLogs) {
     // 1. Direct authoritative delivery_time field from Chapar API
     if (orderData && orderData.delivery_time && typeof orderData.delivery_time === 'string') {
@@ -516,7 +650,7 @@ async function fetchChaparConsignmentPopup(internalId) {
         const xml = `<xjxobj><e><k>FormName</k><v>FormConsignmentHistory</v></e><e><k>variables</k><v><xjxobj><e><k>no</k><v>${internalId}</v></e></xjxobj></v></e><e><k>functions</k><v>OpenConsHistory(${internalId});,RunFunction</v></e><e><k>Width</k><v>1500</v></e><e><k>Height</k><v>110</v></e><e><k>Border</k><v>0</v></e><e><k>Padding</k><v>0</v></e><e><k>BoxTPL</k><v>PopupBox.tpl</v></e></xjxobj>`;
         const body = `xajax=DoPHP&xajaxr=${Date.now()}&xajaxargs[]=${encodeURIComponent("DrawPopupForm")}&xajaxargs[]=${encodeURIComponent(xml)}`;
         
-        const res = await fetch("https://portal.chaparnet.com/index.php?P=Operation&Tab=Consignment", {
+        const res = await fetchWithTimeout("https://portal.chaparnet.com/index.php?P=Operation&Tab=Consignment", {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -524,7 +658,7 @@ async function fetchChaparConsignmentPopup(internalId) {
             },
             credentials: 'include',
             body: body
-        });
+        }, 15000);
         const text = await res.text();
         return parseChaparPopupHTML(text);
     } catch (e) {
@@ -545,8 +679,16 @@ async function handleChaparFetch(data) {
             return await handleChaparPhoneSearch(data.query);
         }
 
-        const waybill = String(data.query || '').trim();
-        const phone = String(data.phone || '').trim();
+        const waybill = toAsciiDigits(String(data.query || '')).trim();
+        const phone = toAsciiDigits(String(data.phone || '')).trim();
+
+        // Check in-memory cache first to avoid duplicate network load
+        const cached = getCachedShipment(waybill);
+        if (cached) {
+            logDebug("Returning cached shipment data for waybill", waybill);
+            return { success: true, data: cached };
+        }
+
         let portalMetadata = {};
         let internalId = null;
         let packageNo = null;
@@ -561,7 +703,7 @@ async function handleChaparFetch(data) {
                     page: "1", rp: "10", sortname: "tbl_cons.fld_Cons_No", sortorder: "DESC",
                     query: q, qtype: qt
                 });
-                const res = await fetch("https://portal.chaparnet.com/OBJ/List/Consignment.php?Filter=&__Method=Internal&", {
+                const res = await fetchWithTimeout("https://portal.chaparnet.com/OBJ/List/Consignment.php?Filter=&__Method=Internal&", {
                     method: 'POST',
                     headers: { 
                         'accept': 'application/json, text/javascript, */*', 
@@ -570,7 +712,7 @@ async function handleChaparFetch(data) {
                     },
                     credentials: 'include',
                     body: searchBody.toString()
-                });
+                }, 15000);
                 return await res.text();
             };
 
@@ -625,88 +767,100 @@ async function handleChaparFetch(data) {
             logDebug("Portal Consignment Fetch Failed", e.message);
         }
 
-        // 2. If consignment found in authenticated portal, fetch Items, History, and Detail Popup
+        // 2. If consignment found in authenticated portal, fetch Items, History, and Detail Popup concurrently
         if (internalId) {
-            // 2a. Items (Package numbers)
-            try {
-                const itemsBody = new URLSearchParams({
-                    page: "1", rp: "100", sortname: "fld_Cons_Item_No", sortorder: "ASC"
-                });
-                const itemsRes = await fetch(`https://portal.chaparnet.com/OBJ/List/ConsignmentItems.php?cons_no=${internalId}&__Method=Internal&`, {
-                    method: 'POST',
-                    headers: { 
-                        'accept': 'application/json, text/javascript, */*', 
-                        'content-type': 'application/x-www-form-urlencoded',
-                        'x-requested-with': 'XMLHttpRequest'
-                    },
-                    credentials: 'include',
-                    body: itemsBody.toString()
-                });
-                const itemsText = await itemsRes.text();
-                const itemsJson = parseSloppyJSON(itemsText);
-                if (itemsJson && itemsJson.rows) {
-                    itemsJson.rows.forEach(r => {
-                        if (r.cell && r.cell[1]) {
-                            const pkg = stripHtml(r.cell[1]).trim();
-                            if (pkg && !packageIds.includes(pkg)) packageIds.push(pkg);
-                        }
+            const [itemsResult, historyResult, popupResult] = await Promise.allSettled([
+                // 2a. Items (Package numbers)
+                (async () => {
+                    const itemsBody = new URLSearchParams({
+                        page: "1", rp: "100", sortname: "fld_Cons_Item_No", sortorder: "ASC"
                     });
-                    if (packageIds.length > 0) packageNo = packageIds[0];
-                }
-            } catch (e) {
-                logDebug("Portal Items Fetch Failed", e.message);
+                    const itemsRes = await fetchWithTimeout(`https://portal.chaparnet.com/OBJ/List/ConsignmentItems.php?cons_no=${internalId}&__Method=Internal&`, {
+                        method: 'POST',
+                        headers: { 
+                            'accept': 'application/json, text/javascript, */*', 
+                            'content-type': 'application/x-www-form-urlencoded',
+                            'x-requested-with': 'XMLHttpRequest'
+                        },
+                        credentials: 'include',
+                        body: itemsBody.toString()
+                    }, 12000);
+                    const itemsText = await itemsRes.text();
+                    return parseSloppyJSON(itemsText);
+                })(),
+                // 2b. Detailed History Logs from Portal
+                (async () => {
+                    const historyBody = new URLSearchParams({
+                        page: "1", rp: "100", sortname: "COS_STA_DT_TM", sortorder: "DESC",
+                        query: "", qtype: "fld_Persian_Note"
+                    });
+                    const historyRes = await fetchWithTimeout(`https://portal.chaparnet.com/OBJ/List/ConsignmentHistory.php?cons_no=${internalId}&__Method=Internal&`, {
+                        method: 'POST',
+                        headers: { 
+                            'accept': 'application/json, text/javascript, */*', 
+                            'content-type': 'application/x-www-form-urlencoded',
+                            'x-requested-with': 'XMLHttpRequest'
+                        },
+                        credentials: 'include',
+                        body: historyBody.toString()
+                    }, 12000);
+                    const historyText = await historyRes.text();
+                    return parseSloppyJSON(historyText);
+                })(),
+                // 2c. Detailed Popup Form from Portal (FormConsignmentHistory)
+                fetchChaparConsignmentPopup(internalId)
+            ]);
+
+            // Process Items result
+            if (itemsResult.status === 'fulfilled' && itemsResult.value && itemsResult.value.rows) {
+                itemsResult.value.rows.forEach(r => {
+                    if (r.cell && r.cell[1]) {
+                        const pkg = stripHtml(r.cell[1]).trim();
+                        if (pkg && !packageIds.includes(pkg)) packageIds.push(pkg);
+                    }
+                });
+                if (packageIds.length > 0) packageNo = packageIds[0];
+            } else if (itemsResult.status === 'rejected') {
+                logDebug("Portal Items Fetch Failed", itemsResult.reason?.message);
             }
 
-            // 2b. Detailed History Logs from Portal
-            try {
-                const historyBody = new URLSearchParams({
-                    page: "1", rp: "100", sortname: "COS_STA_DT_TM", sortorder: "DESC",
-                    query: "", qtype: "fld_Persian_Note"
+            // Process History result
+            if (historyResult.status === 'fulfilled' && historyResult.value && historyResult.value.rows) {
+                combinedHistory = historyResult.value.rows.map(row => {
+                    const cell = row.cell;
+                    const dateStr = stripHtml(cell[3]);
+                    return {
+                        row: stripHtml(cell[0]),
+                        package: stripHtml(cell[1]),
+                        status: stripHtml(cell[2]),
+                        date: dateStr,
+                        by: stripHtml(cell[4]),
+                        receiver: stripHtml(cell[5]),
+                        branch: stripHtml(cell[6]),
+                        action: stripHtml(cell[7]),
+                        sortKey: parseShamsiSortKey(dateStr)
+                    };
                 });
-                const historyRes = await fetch(`https://portal.chaparnet.com/OBJ/List/ConsignmentHistory.php?cons_no=${internalId}&__Method=Internal&`, {
-                    method: 'POST',
-                    headers: { 
-                        'accept': 'application/json, text/javascript, */*', 
-                        'content-type': 'application/x-www-form-urlencoded',
-                        'x-requested-with': 'XMLHttpRequest'
-                    },
-                    credentials: 'include',
-                    body: historyBody.toString()
-                });
-                const historyText = await historyRes.text();
-                const historyJson = parseSloppyJSON(historyText);
-                if (historyJson && historyJson.rows) {
-                    combinedHistory = historyJson.rows.map(row => {
-                        const cell = row.cell;
-                        const dateStr = stripHtml(cell[3]);
-                        return {
-                            row: stripHtml(cell[0]),
-                            package: stripHtml(cell[1]),
-                            status: stripHtml(cell[2]),
-                            date: dateStr,
-                            by: stripHtml(cell[4]),
-                            receiver: stripHtml(cell[5]),
-                            branch: stripHtml(cell[6]),
-                            action: stripHtml(cell[7]),
-                            sortKey: parseShamsiSortKey(dateStr)
-                        };
-                    });
-                }
-            } catch (e) {
-                logDebug("Portal History Fetch Failed", e.message);
+            } else if (historyResult.status === 'rejected') {
+                logDebug("Portal History Fetch Failed", historyResult.reason?.message);
             }
 
-            // 2c. Fetch Detailed Popup Form from Portal (FormConsignmentHistory)
-            popupData = await fetchChaparConsignmentPopup(internalId);
+            // Process Popup result
+            if (popupResult.status === 'fulfilled') {
+                popupData = popupResult.value;
+            } else if (popupResult.status === 'rejected') {
+                logDebug("Portal Popup Fetch Failed", popupResult.reason?.message);
+            }
 
             // Ensure chronological ordering: newest event always on top
             if (combinedHistory.length > 0) {
                 combinedHistory.sort((a, b) => (b.sortKey || 0) - (a.sortKey || 0));
             }
 
-            // Determine authoritative delivery information from portal
-            const isDelivered = !!(popupData?.isDelivered || portalMetadata.status?.includes('OK') || portalMetadata.status?.includes('تحویل'));
-            const deliveryDate = isDelivered ? (popupData?.deliveredInfo || portalMetadata.status) : null;
+            // Rigorously determine authoritative delivery info without false positives
+            const deliveryInfo = checkDeliveryStatus(portalMetadata.status, popupData, combinedHistory);
+            const isDelivered = deliveryInfo.isDelivered;
+            const deliveryDate = deliveryInfo.deliveryDate;
             const maxDeliveryTime = popupData?.maxDeliveryTime || null;
 
             // Classify shipment safely
@@ -746,7 +900,7 @@ async function handleChaparFetch(data) {
                 receiver: popupData?.receiver || portalMetadata.receiver || null,
                 isDelivered: isDelivered,
                 deliveryDate: deliveryDate,
-                deliveredTo: isDelivered ? (popupData?.deliveredInfo || portalMetadata.receiver) : null,
+                deliveredTo: isDelivered ? (deliveryInfo.deliveredTo || popupData?.deliveredInfo || portalMetadata.receiver) : null,
                 classification: classificationInfo.state,
                 classificationLabel: classificationInfo.label,
                 postalTrackingNumber: classificationInfo.postalBarcode || null,
@@ -754,11 +908,13 @@ async function handleChaparFetch(data) {
                 history: combinedHistory
             };
 
+            // Store in 45s LRU cache
+            setCachedShipment(waybill, finalData);
+
             return { success: true, data: finalData };
         }
 
-        // 3. Fallback when consignment is NOT in authenticated portal (Rule 8: Public-Chapar safe action)
-        // DO NOT import detailed public tracking interpretation or diagnostics.
+        // 3. Fallback when consignment is NOT in authenticated portal (Public-Chapar safe action)
         return {
             success: true,
             data: {
@@ -771,6 +927,7 @@ async function handleChaparFetch(data) {
 
     } catch (error) {
         logDebug("❌ Chapar Fetch Error", error.message);
+        return { success: false, error: error.message || 'خطا در ارتباط با سرور چاپار' };
     }
 }
 
@@ -778,22 +935,22 @@ async function handleChaparFetch(data) {
  * Uses the internal Chapar Portal Flexigrid API to get a list of waybills for a phone number.
  */
 async function handleChaparPhoneSearch(phone) {
+    const cleanPhone = toAsciiDigits(String(phone || '')).trim();
     const endpoint = "https://portal.chaparnet.com/OBJ/List/Consignment.php?Filter=&__Method=Internal&";
     
-    // The exact body format the portal uses
     const bodyParams = new URLSearchParams({
         page: "1",
         rp: "100",
         sortname: "tbl_cons.fld_Cons_No",
         sortorder: "DESC",
-        query: phone,
+        query: cleanPhone,
         qtype: "ReceiverName,ReceiverContact,ReceiverCompany,ReceiverRef,fld_Receiver_Mobile,fld_Receiver_Telephone1,ReceiverADDRESS_LINE_1,ReceiverADDRESS_LINE_2"
     });
 
-    logDebug("Executing Phone Search via Portal", { phone, endpoint });
+    logDebug("Executing Phone Search via Portal", { phone: cleanPhone, endpoint });
 
     try {
-        const response = await fetch(endpoint, {
+        const response = await fetchWithTimeout(endpoint, {
             method: 'POST',
             headers: {
                 'accept': 'application/json, text/javascript, */*',
@@ -802,15 +959,13 @@ async function handleChaparPhoneSearch(phone) {
             },
             credentials: 'include',
             body: bodyParams.toString()
-        });
+        }, 15000);
 
-        // If not logged in, Chapar often returns 200 with HTML login page or 302
         if ((response.redirected && response.url.includes('login')) || response.status === 401 || response.status === 403) {
             return { success: false, error: 'شما باید در تب دیگری در سایت چاپار لاگین باشید' };
         }
 
         const rawText = await response.text();
-        logDebug("Raw Portal Response (Phone Search)", rawText.substring(0, 300) + '...');
         
         if (rawText.includes('name="password"') && rawText.includes('name="username"')) {
             return { success: false, error: 'شما باید در تب دیگری در سایت چاپار لاگین باشید' };
@@ -858,7 +1013,7 @@ async function handleChaparPhoneSearch(phone) {
 
     } catch (e) {
         logDebug("Phone Search Error", e.message);
-        return { success: false, error: e.message };
+        return { success: false, error: e.message || 'خطا در جستجوی شماره تماس' };
     }
 }
 

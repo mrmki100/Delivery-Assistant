@@ -5,7 +5,6 @@
   "description": "Prefix-Based Smart Routing (Chapar vs Post) + Captcha Ready",
   "permissions": [
     "storage",
-    "offscreen",
     "activeTab",
     "tabs",
     "declarativeNetRequest",
@@ -13,6 +12,7 @@
   ],
   "host_permissions": [
     "*://panel.automoby.ir/*",
+    "*://api.automoby.ir/*",
     "*://portal.chaparnet.com/*",
     "*://*.chaparnet.com/*",
     "*://app.krch.ir/*",

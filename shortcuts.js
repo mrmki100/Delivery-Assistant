@@ -1,4 +1,4 @@
-﻿/**
+/**
  * shortcuts.js
  * 
  * Reusable, extensible, and safe Context & Shortcut system for Automoby.
@@ -15,6 +15,23 @@
 (function(window) {
     'use strict';
 
+    function toAsciiDigits(str) {
+        if (str == null) return '';
+        return String(str)
+            .replace(/[\u06F0-\u06F9]/g, d => String.fromCharCode(d.charCodeAt(0) - 0x06F0 + 48))
+            .replace(/[\u0660-\u0669]/g, d => String.fromCharCode(d.charCodeAt(0) - 0x0660 + 48));
+    }
+
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            return await fetch(url, { ...options, signal: controller.signal });
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
     // ==========================================
     // 1. SHORTCUT REGISTRY
     // ==========================================
@@ -28,9 +45,10 @@
             supportedKeys: ['orderId'],
             description: 'لیست مرجوعی‌های کالا و وضعیت استرداد قطعه',
             checkStatus: async (context, token) => {
-                if (!context.orderId) return { state: 'idle', label: 'بدون سفارش' };
+                const cleanOrderId = toAsciiDigits(String(context.orderId || '')).trim();
+                if (!cleanOrderId || !/^\d+$/.test(cleanOrderId)) return { state: 'idle', label: 'بدون سفارش' };
                 try {
-                    const res = await fetch('https://api.automoby.ir/graphql', {
+                    const res = await fetchWithTimeout('https://api.automoby.ir/graphql', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -47,12 +65,12 @@
                             }`,
                             variables: {
                                 query: {
-                                    orderId: parseInt(context.orderId, 10),
+                                    orderId: parseInt(cleanOrderId, 10),
                                     pagination: { page: 0, limit: 5 }
                                 }
                             }
                         })
-                    });
+                    }, 8000);
                     const json = await res.json();
                     const total = json?.data?.getReturnListGeneralTable?.total || 0;
                     if (total > 0) {
@@ -94,9 +112,10 @@
             supportedKeys: ['orderId'],
             description: 'لیست درخواست‌ها و سوابق استرداد وجه دستی',
             checkStatus: async (context, token) => {
-                if (!context.orderId) return { state: 'idle', label: 'بدون سفارش' };
+                const cleanOrderId = toAsciiDigits(String(context.orderId || '')).trim();
+                if (!cleanOrderId || !/^\d+$/.test(cleanOrderId)) return { state: 'idle', label: 'بدون سفارش' };
                 try {
-                    const res = await fetch('https://api.automoby.ir/graphql', {
+                    const res = await fetchWithTimeout('https://api.automoby.ir/graphql', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -113,10 +132,10 @@
                             variables: {
                                 page: 1,
                                 limit: 5,
-                                orderId: parseInt(context.orderId, 10)
+                                orderId: parseInt(cleanOrderId, 10)
                             }
                         })
-                    });
+                    }, 8000);
                     const json = await res.json();
                     const total = json?.data?.adminManualRefunds?.total || 0;
                     const items = json?.data?.adminManualRefunds?.items || [];
@@ -226,8 +245,24 @@
         name: ''
     };
 
-    // Cache of status checks: key is `${shortcutId}_${orderId}` -> statusObj
+    // Cache of status checks with 5-minute TTL to prevent stale status surviving
     const statusCache = new Map();
+    function getCachedStatus(key) {
+        const entry = statusCache.get(key);
+        if (!entry) return null;
+        if (Date.now() - entry.timestamp > 300000) {
+            statusCache.delete(key);
+            return null;
+        }
+        return entry.data;
+    }
+    function setCachedStatus(key, data) {
+        if (statusCache.size > 150) {
+            const firstKey = statusCache.keys().next().value;
+            statusCache.delete(firstKey);
+        }
+        statusCache.set(key, { data, timestamp: Date.now() });
+    }
 
     // ==========================================
     // 3. SAFE INPUT AUTOFILL UTILITY
@@ -440,11 +475,12 @@
         for (const shortcut of SHORTCUT_REGISTRY) {
             if (!enabledIds.includes(shortcut.id) || !shortcut.checkStatus) continue;
 
-            // Check memory cache first
+            // Check memory cache first with TTL
             const cacheKey = `${shortcut.id}_${context.orderId}`;
-            if (statusCache.has(cacheKey)) {
+            const cachedStatus = getCachedStatus(cacheKey);
+            if (cachedStatus) {
                 if (thisSeq === currentContext.seq) {
-                    emitStatusUpdate(shortcut.id, statusCache.get(cacheKey));
+                    emitStatusUpdate(shortcut.id, cachedStatus);
                 }
                 continue;
             }
@@ -460,7 +496,7 @@
                 if (thisSeq !== currentContext.seq) {
                     return; // Stale! Discard immediately
                 }
-                statusCache.set(cacheKey, result);
+                setCachedStatus(cacheKey, result);
                 emitStatusUpdate(shortcut.id, result);
             }).catch(err => {
                 if (thisSeq === currentContext.seq) {
@@ -473,10 +509,10 @@
     function setOrderContext(data) {
         currentContext = {
             seq: currentContext.seq + 1,
-            orderId: String(data.orderId || '').trim(),
-            parcelId: String(data.parcelId || '').trim(),
-            phone: String(data.phone || '').trim(),
-            waybill: String(data.waybill || '').trim(),
+            orderId: toAsciiDigits(String(data.orderId || '')).trim(),
+            parcelId: toAsciiDigits(String(data.parcelId || '')).trim(),
+            phone: toAsciiDigits(String(data.phone || '')).trim(),
+            waybill: toAsciiDigits(String(data.waybill || '')).trim(),
             name: String(data.name || '').trim()
         };
 
