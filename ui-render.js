@@ -643,9 +643,9 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     }
 
     // --- CASE 2: NORMAL CHAPAR PORTAL RECORD ---
-    // 1. DELIVERY & STATUS BANNERS
+    // 1. DELIVERY & STATUS BANNERS (High-signal alerts only; no fabricated in-transit banner)
     let bannerHTML = '';
-    const statusText = (data.status || (data.history && data.history[0]?.status) || 'در حال پیگیری').trim();
+    const statusText = (data.status || (data.history && data.history[0]?.status) || '').trim();
     const statusInfo = resolveChaparStatus(statusText);
     const isDelivered = !!data.isDelivered;
 
@@ -695,20 +695,6 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
                 <span class="cx-banner-icon">${statusInfo.icon}</span>
                 <div class="cx-banner-content">
                     <span class="cx-banner-item"><strong>در دست توزیع:</strong> مرسوله تحویل پیک گردیده و در مسیر تحویل به گیرنده است.</span>
-                    ${estDeliveryText}
-                </div>
-            </div>
-        `;
-    } else {
-        const estDeliveryText = data.maxDeliveryTime
-            ? `<span class="cx-banner-item nowrap"><span class="cx-banner-sep">|</span> حداکثر زمان تحویل: <strong>${_esc(data.maxDeliveryTime)}</strong></span>`
-            : '';
-        bannerHTML += `
-            <div class="cx-delivery-banner cx-in-transit" role="status" aria-label="${_esc(statusInfo.ariaLabel || statusInfo.labelFa)}">
-                <span class="cx-banner-icon">${statusInfo.icon}</span>
-                <div class="cx-banner-content">
-                    <span class="cx-banner-item"><strong>در حال توزیع / پیگیری</strong></span>
-                    <span class="cx-banner-item"><span class="cx-banner-sep">—</span> آخرین وضعیت: <strong>${_esc(statusInfo.labelFa)}</strong></span>
                     ${estDeliveryText}
                 </div>
             </div>
@@ -776,6 +762,12 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
 
     // Priority displayed items first (operational fields)
     const priorityItems = [];
+    if (data.status) {
+        priorityItems.push({ label: 'آخرین وضعیت', value: data.status });
+    }
+    if (data.portalStatus && data.portalStatus !== data.status && data.portalStatus !== '-') {
+        priorityItems.push({ label: 'کد وضعیت پورتال', value: data.portalStatus });
+    }
     if (isDelivered && data.deliveryDate) {
         priorityItems.push({ label: 'زمان دقیق تحویل', value: data.deliveryDate });
     }
@@ -874,7 +866,7 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
 
     // 4. TIMELINE GENERATION (Chronologically sorted with newest at top)
     let logs = Array.isArray(data.history) ? [...data.history] : [];
-    const currentStatus = logs.length > 0 ? (logs[0].status || 'در حال پیگیری') : 'وضعیت نامشخص';
+    const currentStatus = logs.length > 0 ? (logs[0].status || 'وضعیت نامشخص') : 'وضعیت نامشخص';
     let timelineHTML = '';
 
     logs.forEach((log, index) => {
