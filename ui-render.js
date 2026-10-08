@@ -186,15 +186,278 @@ function _attachModalCloseBehavior(overlay, closeFn) {
 let _navContext = null;
 
 /**
- * Canonical Chapar Status Taxonomy & Semantic Resolver.
- * Discovered from empirical audit of 1,600+ real production Chapar consignments.
- * Maps operational states to semantic categories, accessible labels, icons, and visual styles.
+ * Canonical Chapar Status Taxonomy & Exact Server Code Resolver.
+ * Discovered from empirical audit of Chapar logistics engine.
+ * Strictly checks exact server enum codes (CST_ID) and exact database phrases (fld_Persian_Note).
+ * ZERO keyword guessing: never matches arbitrary substrings like 'تحویل' inside 'عدم تحویل'.
  */
+const CHAPAR_KNOWN_CODES = {
+    'OK': {
+        code: 'OK',
+        labelFa: 'سالم تحویل شد',
+        badgeClass: 'badge-success',
+        markerClass: 'marker-success',
+        icon: '✅',
+        category: 'DELIVERED',
+        severity: 'success',
+        ariaLabel: 'وضعیت: تحویل موفق به گیرنده',
+        isTerminal: true
+    },
+    'OD': {
+        code: 'OD',
+        labelFa: 'توزیع توسط پیک',
+        badgeClass: 'badge-cyan',
+        markerClass: 'marker-cyan',
+        icon: '🛵',
+        category: 'OUT_FOR_DELIVERY',
+        severity: 'cyan',
+        ariaLabel: 'وضعیت: مرسوله تحویل پیک جهت توزیع گردید',
+        isTerminal: false
+    },
+    'WA': {
+        code: 'WA',
+        labelFa: 'عدم تحویل بدلیل آدرس یا تلفن اشتباه',
+        badgeClass: 'badge-warning',
+        markerClass: 'marker-warning',
+        icon: '⚠️',
+        category: 'DELIVERY_PROBLEM',
+        severity: 'warning',
+        ariaLabel: 'وضعیت: نقص در آدرس یا تلفن گیرنده (نیاز به پیگیری و تصحیح)',
+        isTerminal: false
+    },
+    'CR': {
+        code: 'CR',
+        labelFa: 'امتناع گیرنده از دریافت',
+        badgeClass: 'badge-danger',
+        markerClass: 'marker-danger',
+        icon: '🛑',
+        category: 'REJECTED',
+        severity: 'danger',
+        ariaLabel: 'وضعیت: گیرنده از دریافت کالا امتناع کرد (مرجوعی)',
+        isTerminal: false
+    },
+    'NH': {
+        code: 'NH',
+        labelFa: 'عدم حضور گیرنده در محل',
+        badgeClass: 'badge-warning',
+        markerClass: 'marker-warning',
+        icon: '⚠️',
+        category: 'DELIVERY_PROBLEM',
+        severity: 'warning',
+        ariaLabel: 'وضعیت: گیرنده در محل حضور نداشت (نیاز به هماهنگی مجدد)',
+        isTerminal: false
+    },
+    'DAR': {
+        code: 'DAR',
+        labelFa: 'تاخیر در توزیع (بررسی مجدد)',
+        badgeClass: 'badge-warning',
+        markerClass: 'marker-warning',
+        icon: '⏳',
+        category: 'DELIVERY_DELAYED',
+        severity: 'warning',
+        ariaLabel: 'وضعیت: تاخیر در برنامه توزیع و زمان‌بندی مجدد',
+        isTerminal: false
+    },
+    'RO': {
+        code: 'RO',
+        labelFa: 'عودت به مشتری (نهایی)',
+        badgeClass: 'badge-danger',
+        markerClass: 'marker-danger',
+        icon: '↩️',
+        category: 'RETURNED',
+        severity: 'danger',
+        ariaLabel: 'وضعیت: عودت داده شد به مشتری فرستنده (مرجوعی نهایی)',
+        isTerminal: true
+    },
+    'RH': {
+        code: 'RH',
+        labelFa: 'عودت به پیمانکار فرستنده',
+        badgeClass: 'badge-danger',
+        markerClass: 'marker-danger',
+        icon: '↩️',
+        category: 'RETURNED',
+        severity: 'danger',
+        ariaLabel: 'وضعیت: در مسیر عودت به فرستنده',
+        isTerminal: false
+    },
+    'RCH': {
+        code: 'RCH',
+        labelFa: 'برگشت به سوله مرکزی',
+        badgeClass: 'badge-danger',
+        markerClass: 'marker-danger',
+        icon: '↩️',
+        category: 'RETURNED',
+        severity: 'danger',
+        ariaLabel: 'وضعیت: برگشت به هاب و سوله مرکزی (عدم تحویل)',
+        isTerminal: false
+    },
+    'OF': {
+        code: 'OF',
+        labelFa: 'اسکن خروج از هاب',
+        badgeClass: 'badge-primary',
+        markerClass: 'marker-primary',
+        icon: '📤',
+        category: 'IN_TRANSIT',
+        severity: 'primary',
+        ariaLabel: 'وضعیت: اسکن خروج به سمت مقصد',
+        isTerminal: false
+    },
+    'OS': {
+        code: 'OS',
+        labelFa: 'حرکت از مبدا',
+        badgeClass: 'badge-primary',
+        markerClass: 'marker-primary',
+        icon: '🚚',
+        category: 'IN_TRANSIT',
+        severity: 'primary',
+        ariaLabel: 'وضعیت: حرکت از مبدا و انتقال بین شهری',
+        isTerminal: false
+    },
+    'IR': {
+        code: 'IR',
+        labelFa: 'ورود به هاب / مرکز پردازش',
+        badgeClass: 'badge-primary',
+        markerClass: 'marker-primary',
+        icon: '📥',
+        category: 'IN_TRANSIT',
+        severity: 'primary',
+        ariaLabel: 'وضعیت: اسکن ورود در هاب توزیع',
+        isTerminal: false
+    },
+    'CI': {
+        code: 'CI',
+        labelFa: 'تخلیه بار در مقصد',
+        badgeClass: 'badge-primary',
+        markerClass: 'marker-primary',
+        icon: '📦',
+        category: 'IN_TRANSIT',
+        severity: 'primary',
+        ariaLabel: 'وضعیت: بار در انبار مقصد تخلیه گردید',
+        isTerminal: false
+    },
+    'DP': {
+        code: 'DP',
+        labelFa: 'سورتینگ و پردازش مرسوله',
+        badgeClass: 'badge-primary',
+        markerClass: 'marker-primary',
+        icon: '⚙️',
+        category: 'IN_TRANSIT',
+        severity: 'primary',
+        ariaLabel: 'وضعیت: در حال پردازش در هاب مرکزی',
+        isTerminal: false
+    },
+    'PU': {
+        code: 'PU',
+        labelFa: 'جمع‌آوری بار از فرستنده',
+        badgeClass: 'badge-neutral',
+        markerClass: 'marker-neutral',
+        icon: '📦',
+        category: 'REGISTERED',
+        severity: 'neutral',
+        ariaLabel: 'وضعیت: بار از فرستنده دریافت و جمع‌آوری شد',
+        isTerminal: false
+    },
+    'PDR': {
+        code: 'PDR',
+        labelFa: 'ثبت مستندات در سامانه',
+        badgeClass: 'badge-neutral',
+        markerClass: 'marker-neutral',
+        icon: '📄',
+        category: 'REGISTERED',
+        severity: 'neutral',
+        ariaLabel: 'وضعیت: مستندات حمل بار در سامانه ثبت گردید',
+        isTerminal: false
+    },
+    'D01': {
+        code: 'D01',
+        labelFa: 'ورود اطلاعات (در انتظار جمع‌آوری)',
+        badgeClass: 'badge-neutral',
+        markerClass: 'marker-neutral',
+        icon: '📝',
+        category: 'REGISTERED',
+        severity: 'neutral',
+        ariaLabel: 'وضعیت: بارنامه ثبت شده و در انتظار جمع‌آوری است',
+        isTerminal: false
+    },
+    'OC': {
+        code: 'OC',
+        labelFa: 'تکمیل ظرفیت ناوگان',
+        badgeClass: 'badge-warning',
+        markerClass: 'marker-warning',
+        icon: '⏳',
+        category: 'DELIVERY_HOLD',
+        severity: 'warning',
+        ariaLabel: 'وضعیت: در انتظار ظرفیت ناوگان ارسال',
+        isTerminal: false
+    },
+    'TW': {
+        code: 'TW',
+        labelFa: 'ارسال به انبار موقت',
+        badgeClass: 'badge-warning',
+        markerClass: 'marker-warning',
+        icon: '🏢',
+        category: 'DELIVERY_HOLD',
+        severity: 'warning',
+        ariaLabel: 'وضعیت: توقف موقت در انبار',
+        isTerminal: false
+    },
+    'POST_HANDOFF': {
+        code: 'POST_HANDOFF',
+        labelFa: 'تحویل به شرکت ملی پست',
+        badgeClass: 'badge-purple',
+        markerClass: 'marker-purple',
+        icon: '📮',
+        category: 'POSTAL_HANDOFF',
+        severity: 'purple',
+        ariaLabel: 'وضعیت: مرسوله تحویل شرکت ملی پست شده است',
+        isTerminal: false
+    }
+};
+
+const CHAPAR_EXACT_PHRASES = {
+    'سالم تحویل شد': 'OK',
+    'تحویل شد': 'OK',
+    'عدم تحویل بدلیل آدرس یا تلفن اشتباه': 'WA',
+    'امتناع گیرنده از دریافت': 'CR',
+    'نبود گیرنده': 'NH',
+    'عدم حضور گیرنده در محل': 'NH',
+    'توزیع توسط پیک': 'OD',
+    'توزیع توسط موزع': 'OD',
+    'توزیع توسط نماینده': 'OD',
+    'تاخیر در توزیع': 'DAR',
+    'در حال بررسی جهت توزیع': 'DAR',
+    'عودت به مشتری(نهایی)': 'RO',
+    'عودت به مشتری': 'RO',
+    'عودت به مشتری نهایی': 'RO',
+    'عودت به پیمانکار فرستنده': 'RH',
+    'عودت به پیمانکار': 'RH',
+    'برگشت به سوله مرکزی': 'RCH',
+    'برگشت به سوله': 'RCH',
+    'اسکن خروج به نماینده پست': 'POST_HANDOFF',
+    'تحویل به شرکت ملی پست': 'POST_HANDOFF',
+    'تحویل به پست': 'POST_HANDOFF',
+    'نماینده پست': 'POST_HANDOFF',
+    'حرکت از مبدا': 'OS',
+    'اسکن ورود': 'IR',
+    'اسکن خروج': 'OF',
+    'تخلیه بار': 'CI',
+    'پردازش پاکات': 'DP',
+    'پردازش در هاب': 'DP',
+    'جمع آوری بار': 'PU',
+    'جمع‌آوری بار': 'PU',
+    'مستندات جمع آوری رسید': 'PDR',
+    'مستندات توزیع': 'PDR',
+    'ورود اطلاعات': 'D01',
+    'تکمیل ظرفیت ناوگان': 'OC',
+    'تکمیل ظرفیت': 'OC',
+    'ارسال به انبار موقت': 'TW'
+};
+
 function resolveChaparStatus(statusInput) {
     if (!statusInput || typeof statusInput !== 'string') {
         return {
             code: 'UNKNOWN',
-            labelFa: 'نامشخص',
+            labelFa: 'وضعیت نامشخص',
             badgeClass: 'badge-neutral',
             markerClass: 'marker-neutral',
             icon: '❓',
@@ -206,292 +469,54 @@ function resolveChaparStatus(statusInput) {
     }
 
     const clean = statusInput.replace(/<[^>]*>/g, '').trim();
-    const codeMatch = clean.match(/^([A-Za-z0-9_-]+)/);
-    const code = codeMatch ? codeMatch[1].toUpperCase() : '';
-
-    // 1. DELIVERED (موفق / سبز)
-    if (code === 'OK' || clean.includes('سالم تحویل شد') || (clean.includes('تحویل شد') && !clean.includes('عدم تحویل'))) {
+    if (!clean) {
         return {
-            code: 'OK',
-            labelFa: 'سالم تحویل شد',
-            badgeClass: 'badge-success',
-            markerClass: 'marker-success',
-            icon: '✅',
-            category: 'DELIVERED',
-            severity: 'success',
-            ariaLabel: 'وضعیت: تحویل موفق به گیرنده',
-            isTerminal: true
-        };
-    }
-
-    // 2. RETURNED & REJECTED (مرجوعی و بازگشت / قرمز)
-    if (code === 'RO' || clean.includes('عودت به مشتری')) {
-        return {
-            code: 'RO',
-            labelFa: 'عودت به مشتری (نهایی)',
-            badgeClass: 'badge-danger',
-            markerClass: 'marker-danger',
-            icon: '↩️',
-            category: 'RETURNED',
-            severity: 'danger',
-            ariaLabel: 'وضعیت: عودت داده شد به مشتری فرستنده (مرجوعی نهایی)',
-            isTerminal: true
-        };
-    }
-    if (code === 'RH' || clean.includes('عودت به پیمانکار')) {
-        return {
-            code: 'RH',
-            labelFa: 'عودت به پیمانکار فرستنده',
-            badgeClass: 'badge-danger',
-            markerClass: 'marker-danger',
-            icon: '↩️',
-            category: 'RETURNED',
-            severity: 'danger',
-            ariaLabel: 'وضعیت: در مسیر عودت به فرستنده',
-            isTerminal: false
-        };
-    }
-    if (code === 'RCH' || clean.includes('برگشت به سوله مرکزی') || clean.includes('برگشت به سوله')) {
-        return {
-            code: 'RCH',
-            labelFa: 'برگشت به سوله مرکزی',
-            badgeClass: 'badge-danger',
-            markerClass: 'marker-danger',
-            icon: '↩️',
-            category: 'RETURNED',
-            severity: 'danger',
-            ariaLabel: 'وضعیت: برگشت به هاب و سوله مرکزی (عدم تحویل)',
-            isTerminal: false
-        };
-    }
-    if (code === 'CR' || clean.includes('امتناع گیرنده') || clean.includes('انصراف گیرنده')) {
-        return {
-            code: 'CR',
-            labelFa: 'امتناع گیرنده از دریافت',
-            badgeClass: 'badge-danger',
-            markerClass: 'marker-danger',
-            icon: '🛑',
-            category: 'REJECTED',
-            severity: 'danger',
-            ariaLabel: 'وضعیت: گیرنده از دریافت کالا امتناع کرد (مرجوعی)',
-            isTerminal: false
-        };
-    }
-
-    // 3. DELIVERY PROBLEMS & DELAYS (مشکل در توزیع و تاخیر / نارنجی)
-    if (code === 'NH' || clean.includes('نبود گیرنده') || clean.includes('عدم حضور')) {
-        return {
-            code: 'NH',
-            labelFa: 'عدم حضور گیرنده در محل',
-            badgeClass: 'badge-warning',
-            markerClass: 'marker-warning',
-            icon: '⚠️',
-            category: 'DELIVERY_PROBLEM',
-            severity: 'warning',
-            ariaLabel: 'وضعیت: گیرنده در محل حضور نداشت (نیاز به هماهنگی مجدد)',
-            isTerminal: false
-        };
-    }
-    if (code === 'WA' || clean.includes('آدرس یا تلفن اشتباه') || clean.includes('نقص آدرس')) {
-        return {
-            code: 'WA',
-            labelFa: 'عدم تحویل بدلیل آدرس یا تلفن اشتباه',
-            badgeClass: 'badge-warning',
-            markerClass: 'marker-warning',
-            icon: '⚠️',
-            category: 'DELIVERY_PROBLEM',
-            severity: 'warning',
-            ariaLabel: 'وضعیت: نقص در آدرس یا تلفن گیرنده (نیاز به تصحیح آدرس)',
-            isTerminal: false
-        };
-    }
-    if (code === 'DAR' || clean.includes('تاخیر در توزیع') || clean.includes('در حال بررسی جهت توزیع')) {
-        return {
-            code: 'DAR',
-            labelFa: 'تاخیر در توزیع (بررسی مجدد)',
-            badgeClass: 'badge-warning',
-            markerClass: 'marker-warning',
-            icon: '⏳',
-            category: 'DELIVERY_DELAYED',
-            severity: 'warning',
-            ariaLabel: 'وضعیت: تاخیر در برنامه توزیع و زمان‌بندی مجدد',
-            isTerminal: false
-        };
-    }
-    if (code === 'TW' || clean.includes('انبار موقت')) {
-        return {
-            code: 'TW',
-            labelFa: 'ارسال به انبار موقت',
-            badgeClass: 'badge-warning',
-            markerClass: 'marker-warning',
-            icon: '🏢',
-            category: 'DELIVERY_HOLD',
-            severity: 'warning',
-            ariaLabel: 'وضعیت: توقف موقت در انبار',
-            isTerminal: false
-        };
-    }
-    if (code === 'OC' || clean.includes('ظرفیت تکمیل')) {
-        return {
-            code: 'OC',
-            labelFa: 'تکمیل ظرفیت ناوگان',
-            badgeClass: 'badge-warning',
-            markerClass: 'marker-warning',
-            icon: '⏳',
-            category: 'DELIVERY_HOLD',
-            severity: 'warning',
-            ariaLabel: 'وضعیت: در انتظار ظرفیت ناوگان ارسال',
-            isTerminal: false
-        };
-    }
-
-    // 4. OUT FOR DELIVERY (در دست توزیع / فیروزه‌ای)
-    if (code === 'OD' || clean.includes('توزیع توسط پیک') || clean.includes('توزیع توسط موزع')) {
-        return {
-            code: 'OD',
-            labelFa: 'توزیع توسط پیک (در دست موزع)',
-            badgeClass: 'badge-cyan',
-            markerClass: 'marker-cyan',
-            icon: '🛵',
-            category: 'OUT_FOR_DELIVERY',
-            severity: 'cyan',
-            ariaLabel: 'وضعیت: مرسوله تحویل پیک جهت توزیع گردید',
-            isTerminal: false
-        };
-    }
-
-    // 5. POSTAL HANDOFF (تحویل به پست / بنفش)
-    if (clean.includes('نماینده پست') || clean.includes('تحویل پست') || clean.includes('تحویل به پست') || clean.includes('ارسال به پست')) {
-        return {
-            code: 'POST_HANDOFF',
-            labelFa: 'تحویل به شرکت ملی پست',
-            badgeClass: 'badge-purple',
-            markerClass: 'marker-purple',
-            icon: '📮',
-            category: 'POSTAL_HANDOFF',
-            severity: 'purple',
-            ariaLabel: 'وضعیت: مرسوله تحویل شرکت ملی پست شده است',
-            isTerminal: false
-        };
-    }
-
-    // 6. IN TRANSIT (در حال انتقال / آبی کاربنی)
-    if (code === 'OS' || clean.includes('حرکت از مبدا')) {
-        return {
-            code: 'OS',
-            labelFa: 'حرکت از مبدا (در مسیر انتقال)',
-            badgeClass: 'badge-primary',
-            markerClass: 'marker-primary',
-            icon: '🚚',
-            category: 'IN_TRANSIT',
-            severity: 'primary',
-            ariaLabel: 'وضعیت: حرکت از مبدا و انتقال بین شهری',
-            isTerminal: false
-        };
-    }
-    if (code === 'IR' || clean.includes('اسکن ورود')) {
-        return {
-            code: 'IR',
-            labelFa: 'ورود به هاب / مرکز پردازش',
-            badgeClass: 'badge-primary',
-            markerClass: 'marker-primary',
-            icon: '📥',
-            category: 'IN_TRANSIT',
-            severity: 'primary',
-            ariaLabel: 'وضعیت: اسکن ورود در هاب توزیع',
-            isTerminal: false
-        };
-    }
-    if (code === 'CI' || clean.includes('تخلیه بار')) {
-        return {
-            code: 'CI',
-            labelFa: 'تخلیه بار در مقصد',
-            badgeClass: 'badge-primary',
-            markerClass: 'marker-primary',
-            icon: '📦',
-            category: 'IN_TRANSIT',
-            severity: 'primary',
-            ariaLabel: 'وضعیت: بار در انبار مقصد تخلیه گردید',
-            isTerminal: false
-        };
-    }
-    if (code === 'DP' || clean.includes('پردازش پاکات')) {
-        return {
-            code: 'DP',
-            labelFa: 'سورتینگ و پردازش مرسوله',
-            badgeClass: 'badge-primary',
-            markerClass: 'marker-primary',
-            icon: '⚙️',
-            category: 'IN_TRANSIT',
-            severity: 'primary',
-            ariaLabel: 'وضعیت: در حال پردازش در هاب مرکزی',
-            isTerminal: false
-        };
-    }
-    if (code === 'OF' || clean.includes('اسکن خروج')) {
-        return {
-            code: 'OF',
-            labelFa: 'اسکن خروج از هاب / مرکز پردازش',
-            badgeClass: 'badge-primary',
-            markerClass: 'marker-primary',
-            icon: '📤',
-            category: 'IN_TRANSIT',
-            severity: 'primary',
-            ariaLabel: 'وضعیت: اسکن خروج به سمت مقصد',
-            isTerminal: false
-        };
-    }
-
-    // 7. REGISTERED & PICKUP (ثبت اولیه و جمع‌آوری / خاکستری)
-    if (code === 'PU' || clean.includes('جمع آوری بار') || clean.includes('جمع‌آوری')) {
-        return {
-            code: 'PU',
-            labelFa: 'جمع‌آوری بار از فرستنده',
+            code: 'UNKNOWN',
+            labelFa: 'وضعیت نامشخص',
             badgeClass: 'badge-neutral',
             markerClass: 'marker-neutral',
-            icon: '📦',
-            category: 'REGISTERED',
+            icon: '❓',
+            category: 'UNKNOWN',
             severity: 'neutral',
-            ariaLabel: 'وضعیت: بار از فرستنده دریافت و جمع‌آوری شد',
-            isTerminal: false
-        };
-    }
-    if (code === 'PDR' || clean.includes('مستندات جمع آوری') || clean.includes('مستندات توزیع')) {
-        return {
-            code: 'PDR',
-            labelFa: 'ثبت مستندات در سامانه',
-            badgeClass: 'badge-neutral',
-            markerClass: 'marker-neutral',
-            icon: '📄',
-            category: 'REGISTERED',
-            severity: 'neutral',
-            ariaLabel: 'وضعیت: مستندات حمل بار در سامانه ثبت گردید',
-            isTerminal: false
-        };
-    }
-    if (code === 'D01' || clean.includes('ورود اطلاعات')) {
-        return {
-            code: 'D01',
-            labelFa: 'ورود اطلاعات (در انتظار جمع‌آوری)',
-            badgeClass: 'badge-neutral',
-            markerClass: 'marker-neutral',
-            icon: '📝',
-            category: 'REGISTERED',
-            severity: 'neutral',
-            ariaLabel: 'وضعیت: بارنامه ثبت شده و در انتظار جمع‌آوری است',
+            ariaLabel: 'وضعیت نامشخص',
             isTerminal: false
         };
     }
 
-    // Fallback: clean string
+    // 1. Direct authoritative status code match (e.g. 'OK', 'WA', 'CR', 'OD', 'OS', 'D01')
+    const upper = clean.toUpperCase();
+    if (CHAPAR_KNOWN_CODES[upper]) {
+        return { ...CHAPAR_KNOWN_CODES[upper] };
+    }
+
+    // 2. Check code prefix if format is like 'OD (توزیع توسط پیک)' or 'NH (نبود گیرنده)'
+    const codePrefixMatch = clean.match(/^([A-Za-z0-9_-]+)\b/);
+    if (codePrefixMatch && CHAPAR_KNOWN_CODES[codePrefixMatch[1].toUpperCase()]) {
+        const found = CHAPAR_KNOWN_CODES[codePrefixMatch[1].toUpperCase()];
+        return {
+            ...found,
+            labelFa: clean.includes('(') ? clean : found.labelFa
+        };
+    }
+
+    // 3. Exact full phrase match (strictly full equality - ZERO substring keyword guessing)
+    if (CHAPAR_EXACT_PHRASES[clean] && CHAPAR_KNOWN_CODES[CHAPAR_EXACT_PHRASES[clean]]) {
+        const matched = CHAPAR_KNOWN_CODES[CHAPAR_EXACT_PHRASES[clean]];
+        return {
+            ...matched,
+            labelFa: clean // preserve the exact server database text
+        };
+    }
+
+    // 4. Safe Fallback: Display the exact server-provided string directly without inferring
     return {
-        code: code || 'OTHER',
+        code: 'CUSTOM',
         labelFa: clean,
-        badgeClass: 'badge-warning',
-        markerClass: 'marker-warning',
+        badgeClass: 'badge-neutral',
+        markerClass: 'marker-neutral',
         icon: '📋',
-        category: 'IN_TRANSIT',
-        severity: 'warning',
+        category: 'CUSTOM',
+        severity: 'neutral',
         ariaLabel: `وضعیت: ${clean}`,
         isTerminal: false
     };
@@ -622,38 +647,40 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     let bannerHTML = '';
     const statusText = (data.status || (data.history && data.history[0]?.status) || 'در حال پیگیری').trim();
     const statusInfo = resolveChaparStatus(statusText);
-    const isDelivered = !!(data.isDelivered && (data.deliveryDate || data.deliveredInfo));
+    const isDelivered = !!data.isDelivered;
 
     if (isDelivered) {
+        const deliveryTimePart = (data.deliveryDate || data.deliveredInfo) ? ` — زمان دقیق تحویل: <strong>${_esc(data.deliveryDate || data.deliveredInfo)}</strong>` : '';
+        const deliveryRecipientPart = data.deliveredTo ? ` به گیرنده: <strong>${_esc(data.deliveredTo)}</strong>` : '';
         bannerHTML += `
             <div class="cx-delivery-banner cx-delivered" role="status" aria-label="تحویل موفق به گیرنده">
-                ✅ <strong>تحویل شد</strong> — زمان دقیق تحویل: <strong>${_esc(data.deliveryDate || '')}</strong>${data.deliveredTo ? ` به گیرنده: <strong>${_esc(data.deliveredTo)}</strong>` : ''}
+                ✅ <strong>تحویل شد</strong>${deliveryTimePart}${deliveryRecipientPart}
             </div>
         `;
     } else if (statusInfo.category === 'RETURNED' || statusInfo.category === 'REJECTED') {
         bannerHTML += `
-            <div class="cx-delivery-banner" role="status" aria-label="${_esc(statusInfo.ariaLabel)}" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #dc2626; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-weight: 600;">
+            <div class="cx-delivery-banner" role="status" aria-label="${_esc(statusInfo.ariaLabel || statusInfo.labelFa)}" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #dc2626; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-weight: 600;">
                 ${statusInfo.icon} <strong>مرجوعی / عدم تحویل:</strong> ${_esc(statusInfo.labelFa)}
             </div>
         `;
     } else if (statusInfo.category === 'DELIVERY_PROBLEM' || statusInfo.category === 'DELIVERY_DELAYED' || statusInfo.category === 'DELIVERY_HOLD') {
         bannerHTML += `
-            <div class="cx-delivery-banner" role="status" aria-label="${_esc(statusInfo.ariaLabel)}" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); color: #d97706; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-weight: 600;">
+            <div class="cx-delivery-banner" role="status" aria-label="${_esc(statusInfo.ariaLabel || statusInfo.labelFa)}" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); color: #d97706; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-weight: 600;">
                 ${statusInfo.icon} <strong>نیاز به پیگیری / مشکل در توزیع:</strong> ${_esc(statusInfo.labelFa)}
             </div>
         `;
     } else if (statusInfo.category === 'OUT_FOR_DELIVERY') {
         const estDeliveryText = data.maxDeliveryTime ? ` (حداکثر زمان تحویل: <strong>${_esc(data.maxDeliveryTime)}</strong>)` : '';
         bannerHTML += `
-            <div class="cx-delivery-banner" role="status" aria-label="${_esc(statusInfo.ariaLabel)}" style="background: rgba(6, 182, 212, 0.12); border: 1px solid rgba(6, 182, 212, 0.35); color: #0891b2; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-weight: 600;">
+            <div class="cx-delivery-banner" role="status" aria-label="${_esc(statusInfo.ariaLabel || statusInfo.labelFa)}" style="background: rgba(6, 182, 212, 0.12); border: 1px solid rgba(6, 182, 212, 0.35); color: #0891b2; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-weight: 600;">
                 ${statusInfo.icon} <strong>در دست توزیع:</strong> مرسوله تحویل پیک گردیده و در مسیر تحویل به گیرنده است.${estDeliveryText}
             </div>
         `;
     } else {
         const estDeliveryText = data.maxDeliveryTime ? ` | حداکثر زمان تحویل: <strong>${_esc(data.maxDeliveryTime)}</strong>` : '';
         bannerHTML += `
-            <div class="cx-delivery-banner cx-in-transit" role="status" aria-label="در حال انتقال">
-                🚚 <strong>در حال توزیع / پیگیری</strong> — آخرین وضعیت: <strong>${_esc(statusInfo.labelFa)}</strong>${estDeliveryText}
+            <div class="cx-delivery-banner cx-in-transit" role="status" aria-label="${_esc(statusInfo.ariaLabel || statusInfo.labelFa)}">
+                ${statusInfo.icon} <strong>آخرین وضعیت:</strong> <strong>${_esc(statusInfo.labelFa)}</strong>${estDeliveryText}
             </div>
         `;
     }

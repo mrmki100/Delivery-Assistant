@@ -218,3 +218,21 @@ In accordance with WCAG 2.1 Level AA:
 - **Styles & Dark Mode Overrides:** [`styles.css`](file:///c:/Users/mrmki/Documents/antiGG%20repo/Delivery%20Assistant/styles.css) (`.badge-success`, `.badge-warning`, `.badge-danger`, `.badge-cyan`, `.badge-primary`, `.badge-purple`, `.badge-neutral`).
 - **Classification Engine:** `classifyShipment` and `deriveDeliveryDate` in [`background.js`](file:///c:/Users/mrmki/Documents/antiGG%20repo/Delivery%20Assistant/background.js).
 - **Data Flow & Navigation:** [`docs/SPIDER_MODEL.md`](file:///c:/Users/mrmki/Documents/antiGG%20repo/Delivery%20Assistant/docs/SPIDER_MODEL.md).
+
+---
+
+## 8. Server-Authoritative Status Ingestion (Zero Keyword Heuristics Guarantee)
+
+To guarantee 100% operational safety and prevent catastrophic false positives (such as misclassifying `عدم تحویل` as `تحویل شد`), the extension strictly enforces **Server-Authoritative Status Ingestion**:
+
+1. **Direct Enum Code Ingestion:**
+   - Evaluates Chapar's internal database code (`CST_ID`) directly from `Consignment.php` (`cell[6]`).
+   - Delivery is marked as completed (`isDelivered = true`) **strictly and exclusively** when `CST_ID === 'OK'` or when Chapar's server renders `Images/SmallTickGreen.png` in the authenticated popup.
+   - Non-delivery codes (e.g. `WA: عدم تحویل بدلیل آدرس یا تلفن اشتباه`, `CR: امتناع گیرنده از دریافت`, `RO: عودت به مشتری نهایی`) are mapped to their true operational states without any keyword inference.
+
+2. **Full-Phrase Database Matching:**
+   - In `ConsignmentHistory.php` (`cell[2]`), events are mapped exclusively via full-string equality (`CHAPAR_EXACT_PHRASES`). Substring checks (`includes('تحویل')`) are completely banned.
+
+3. **Safe Exact-Text Fallback:**
+   - If an unrecognized status code or phrase is introduced by Chapar's server, the engine falls back to `category: 'CUSTOM'` and directly presents the exact server-provided Persian text to the operator with a neutral badge (`📋`), ensuring total transparency without speculation.
+

@@ -423,8 +423,8 @@ function stripHtml(str) {
  */
 
 /**
- * Rigorously checks delivery status from live Chapar responses.
- * Negative guards prevent false positives (e.g. WA: عدم تحویل بدلیل آدرس یا تلفن اشتباه).
+ * Rigorously checks delivery status from authoritative Chapar server responses.
+ * Zero keyword guessing: strictly checks server's CST_ID ('OK'), popup tick icon, or exact event phrase 'سالم تحویل شد'.
  */
 function checkDeliveryStatus(portalStatus, popupData, historyLogs) {
     if (popupData?.isDelivered) {
@@ -435,23 +435,19 @@ function checkDeliveryStatus(portalStatus, popupData, historyLogs) {
         };
     }
     
-    const st = String(portalStatus || '').trim();
-    const isNegative = st.includes('عدم تحویل') || st.includes('عدم') || st.includes('امتناع') || st.includes('برگشت') || st.includes('عودت');
-    if (!isNegative && (st === 'OK' || st.startsWith('OK ') || st.startsWith('OK(') || st.includes('سالم تحویل شد') || st.includes('تحویل شد'))) {
+    const st = String(portalStatus || '').trim().toUpperCase();
+    if (st === 'OK' || st.startsWith('OK ') || st.startsWith('OK(')) {
         return {
             isDelivered: true,
-            deliveryDate: st,
+            deliveryDate: null,
             deliveredTo: null
         };
     }
 
     if (Array.isArray(historyLogs) && historyLogs.length > 0) {
         for (const log of historyLogs) {
-            const lst = String(log.status || '').trim();
-            if (lst.includes('عدم تحویل') || lst.includes('عدم') || lst.includes('امتناع') || lst.includes('برگشت') || lst.includes('عودت')) {
-                continue;
-            }
-            if (lst.includes('سالم تحویل شد') || lst.includes('تحویل شد') || lst === 'OK' || lst.startsWith('OK ') || lst.startsWith('OK(')) {
+            const rawStatus = String(log.status || '').trim();
+            if (rawStatus === 'سالم تحویل شد' || rawStatus.toUpperCase() === 'OK') {
                 return {
                     isDelivered: true,
                     deliveryDate: log.date || null,
@@ -482,15 +478,11 @@ function deriveDeliveryDate(orderData, historyLogs) {
         }
     }
 
-    // 2. Verified delivery status event in history logs
+    // 2. Verified delivery status event in history logs (exact match only - zero substring keyword guessing)
     if (Array.isArray(historyLogs) && historyLogs.length > 0) {
         for (const log of historyLogs) {
             const st = String(log.status || '').trim();
-            // Negative guards against false positive matches (e.g., WA: عدم تحویل بدلیل آدرس یا تلفن اشتباه)
-            if (st.includes('عدم تحویل') || st.includes('عدم') || st.includes('امتناع') || st.includes('برگشت') || st.includes('عودت')) {
-                continue;
-            }
-            if (st.includes('سالم تحویل شد') || st.includes('تحویل شد') || st === 'OK' || st.startsWith('OK ') || st.startsWith('OK(')) {
+            if (st === 'سالم تحویل شد' || st.toUpperCase() === 'OK') {
                 return {
                     isDelivered: true,
                     deliveryDate: log.date || null,
@@ -610,8 +602,8 @@ function parseChaparPopupHTML(rawHtml) {
     const createdMatch = html.match(/<div>\s*ایجاد:\s*([\s\S]*?)\s*<\/div>/);
     const changedMatch = html.match(/<div>\s*تغییر:\s*([\s\S]*?)\s*<\/div>/);
 
-    // Check delivered
-    const isDelivered = html.includes('SmallTickGreen.png') || (html.includes('تحویل') && html.includes('color:green'));
+    // Check delivered - exclusively using SmallTickGreen.png rendered by server
+    const isDelivered = html.includes('SmallTickGreen.png');
     const deliveredMatch = html.match(/SmallTickGreen\.png[^>]*>(?:&nbsp;|\s)*([^<]+:\s*[0-9\/: ]+)/);
 
     // Receiver and Sender address / text
@@ -783,13 +775,15 @@ async function handleChaparFetch(data) {
             if (row && row.id) {
                 internalId = row.id;
                 const cell = row.cell || [];
+                const rawStatusCode = stripHtml(cell[6]).trim();
                 portalMetadata = {
                     pickupDate: stripHtml(cell[1]),
                     portalWaybill: stripHtml(cell[2]),
                     origin: stripHtml(cell[3]),
                     dest: stripHtml(cell[4]),
                     service: stripHtml(cell[5]),
-                    status: stripHtml(cell[6]),
+                    statusCode: rawStatusCode,
+                    status: rawStatusCode,
                     sender: stripHtml(cell[7]),
                     receiver: stripHtml(cell[8]),
                     pieces: stripHtml(cell[9]),
@@ -921,7 +915,11 @@ async function handleChaparFetch(data) {
                 dest: popupData?.dest || portalMetadata.dest || null,
                 service: popupData?.method || portalMetadata.service || null,
                 method: popupData?.method || portalMetadata.service || null,
-                status: portalMetadata.status || (combinedHistory[0]?.status || 'در حال پیگیری'),
+                statusCode: (portalMetadata.statusCode || portalMetadata.status || '').toUpperCase(),
+                portalStatus: portalMetadata.status || null,
+                status: (combinedHistory.length > 0 && combinedHistory[0]?.status)
+                    ? combinedHistory[0].status
+                    : (portalMetadata.status || 'وضعیت نامشخص'),
                 pickupDate: popupData?.pickupDate || portalMetadata.pickupDate || null,
                 pickupTime: popupData?.pickupTime || null,
                 maxDeliveryTime: maxDeliveryTime,
