@@ -98,10 +98,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.action === 'OPEN_PUBLIC_CHAPAR_TAB') {
-        const cleanQuery = toAsciiDigits(String(message.query || '')).trim();
-        const query = encodeURIComponent(cleanQuery);
-        chrome.tabs.create({ url: `https://www.chaparnet.com/track/${query}` })
-            .then(() => sendResponse({ success: true }))
+        handlePublicChaparTab(message.query)
+            .then(sendResponse)
             .catch(err => sendResponse({ success: false, error: err.message }));
         return true;
     }
@@ -1057,7 +1055,13 @@ async function handleChaparPhoneSearch(phone) {
  * Opens or reuses a tab for Iran Post and injects the tracking number into local storage.
  */
 async function handlePostTab(trackingNo) {
-    await chrome.storage.local.set({ postTrackingTask: trackingNo });
+    let cleanNo = toAsciiDigits(String(trackingNo || '')).trim();
+    if (cleanNo.includes('،')) {
+        cleanNo = cleanNo.split('،')[0].trim();
+    } else if (cleanNo.includes(',')) {
+        cleanNo = cleanNo.split(',')[0].trim();
+    }
+    await chrome.storage.local.set({ postTrackingTask: cleanNo });
     const tabs = await chrome.tabs.query({ url: "*://tracking.post.ir/*" });
     
     if (tabs.length > 0) {
@@ -1066,6 +1070,29 @@ async function handlePostTab(trackingNo) {
         await chrome.tabs.reload(tabs[0].id); 
     } else {
         await chrome.tabs.create({ url: "https://tracking.post.ir/" });
+    }
+    return { success: true };
+}
+
+/**
+ * Opens or reuses a tab for public Chapar tracking and navigates to the tracking URL with the given tracking number.
+ */
+async function handlePublicChaparTab(trackingNo) {
+    let cleanQuery = toAsciiDigits(String(trackingNo || '')).trim();
+    if (cleanQuery.includes('،')) {
+        cleanQuery = cleanQuery.split('،')[0].trim();
+    } else if (cleanQuery.includes(',')) {
+        cleanQuery = cleanQuery.split(',')[0].trim();
+    }
+    const query = encodeURIComponent(cleanQuery);
+    const targetUrl = `https://www.chaparnet.com/track/${query}`;
+    const tabs = await chrome.tabs.query({ url: "*://www.chaparnet.com/track/*" });
+    
+    if (tabs.length > 0) {
+        await chrome.tabs.update(tabs[0].id, { url: targetUrl, active: true });
+        await chrome.windows.update(tabs[0].windowId, { focused: true });
+    } else {
+        await chrome.tabs.create({ url: targetUrl });
     }
     return { success: true };
 }

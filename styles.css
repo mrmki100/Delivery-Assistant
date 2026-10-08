@@ -1087,10 +1087,9 @@
 .cx-package-card {
     grid-column: 1 / -1;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 10px 14px;
+    flex-direction: column;
+    gap: 10px;
+    padding: 11px 14px;
     margin: 4px 0;
     background: #ffffff;
     border: 1.5px solid #cbd5e1;
@@ -1104,6 +1103,15 @@
     border-color: #3a3a52;
     border-inline-start-color: #9061f9;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.cx-package-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    width: 100%;
 }
 
 .cx-package-card-main {
@@ -1189,6 +1197,106 @@
     background: #35354d;
     border-color: #4a4a62;
     color: #ffffff;
+}
+
+/* Quick Tracking Action Buttons */
+.cx-package-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed #e2e8f0;
+    flex-wrap: wrap;
+    width: 100%;
+}
+
+:host(.cx-dark) .cx-package-card-actions {
+    border-top-color: #3a3a52;
+}
+
+.cx-track-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 5px 14px;
+    font-size: 12px;
+    font-weight: 700;
+    font-family: inherit;
+    border-radius: 6px;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.15s ease-in-out;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.cx-track-btn-icon {
+    font-size: 13px;
+    line-height: 1;
+}
+
+/* Chapar Quick Action Button */
+.cx-track-chapar-btn {
+    background: #f5f3ff;
+    color: #6f2cf6;
+    border: 1.5px solid #ddd6fe;
+}
+
+.cx-track-chapar-btn:hover {
+    background: #6f2cf6;
+    color: #ffffff;
+    border-color: #6f2cf6;
+    box-shadow: 0 2px 6px rgba(111, 44, 246, 0.25);
+    transform: translateY(-1px);
+}
+
+.cx-track-chapar-btn:active {
+    transform: translateY(0);
+}
+
+:host(.cx-dark) .cx-track-chapar-btn {
+    background: rgba(144, 97, 249, 0.15);
+    color: #c4b5fd;
+    border-color: rgba(144, 97, 249, 0.4);
+}
+
+:host(.cx-dark) .cx-track-chapar-btn:hover {
+    background: #9061f9;
+    color: #ffffff;
+    border-color: #9061f9;
+    box-shadow: 0 2px 8px rgba(144, 97, 249, 0.35);
+}
+
+/* Post Quick Action Button */
+.cx-track-post-btn {
+    background: #fffbeb;
+    color: #b45309;
+    border: 1.5px solid #fde68a;
+}
+
+.cx-track-post-btn:hover {
+    background: #d97706;
+    color: #ffffff;
+    border-color: #d97706;
+    box-shadow: 0 2px 6px rgba(217, 119, 6, 0.25);
+    transform: translateY(-1px);
+}
+
+.cx-track-post-btn:active {
+    transform: translateY(0);
+}
+
+:host(.cx-dark) .cx-track-post-btn {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fcd34d;
+    border-color: rgba(245, 158, 11, 0.4);
+}
+
+:host(.cx-dark) .cx-track-post-btn:hover {
+    background: #f59e0b;
+    color: #1e1e2e;
+    border-color: #f59e0b;
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.35);
 }
 
 /* Responsive adjustments for smaller screens */

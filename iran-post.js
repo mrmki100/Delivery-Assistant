@@ -19,7 +19,12 @@
     // Retrieve the tracking number passed from Automoby
     chrome.storage.local.get(['postTrackingTask'], function(result) {
         const rawTask = result.postTrackingTask;
-        const trackingNo = toAsciiDigits(String(rawTask || '')).trim();
+        let trackingNo = toAsciiDigits(String(rawTask || '')).trim();
+        if (trackingNo && trackingNo.includes('،')) {
+            trackingNo = trackingNo.split('،')[0].trim();
+        } else if (trackingNo && trackingNo.includes(',')) {
+            trackingNo = trackingNo.split(',')[0].trim();
+        }
         
         if (trackingNo && /^\d{10,30}$/.test(trackingNo)) {
             console.log("📦 [Delivery Assistant] Found Post Tracking Task:", trackingNo);

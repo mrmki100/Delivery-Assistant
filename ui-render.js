@@ -27,34 +27,34 @@ function _esc(str) {
  */
 function getExtensionRoot() {
     let host = document.getElementById('automoby-cx-extension-host');
-    
+
     if (!host) {
         host = document.createElement('div');
         host.id = 'automoby-cx-extension-host';
         host.style.cssText = 'position: fixed; z-index: 2147483647; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;';
         document.body.appendChild(host);
-        
+
         // Attach Shadow DOM (Open mode allows our script to access it)
         const shadowRoot = host.attachShadow({ mode: 'open' });
-        
+
         // Inject our isolated CSS
         const link = document.createElement('link');
         link.rel = 'stylesheet';
         link.href = chrome.runtime.getURL('styles.css');
         shadowRoot.appendChild(link);
-        
+
         // Create the actual container where UI elements will live
         const root = document.createElement('div');
         root.id = 'automoby-cx-extension-root';
         root.style.pointerEvents = 'auto'; // Re-enable clicks for our UI
         shadowRoot.appendChild(root);
-        
+
         // Restore persisted theme on first load
         _restoreTheme(host);
-        
+
         return root;
     }
-    
+
     return host.shadowRoot.getElementById('automoby-cx-extension-root');
 }
 
@@ -83,9 +83,9 @@ function _restoreTheme(host) {
 function toggleTheme() {
     const host = document.getElementById('automoby-cx-extension-host');
     if (!host) return;
-    
+
     const isDark = host.classList.toggle('cx-dark');
-    
+
     // Update all toggle button icons in the Shadow DOM
     const root = host.shadowRoot.getElementById('automoby-cx-extension-root');
     if (root) {
@@ -95,7 +95,7 @@ function toggleTheme() {
             btn.setAttribute('aria-label', isDark ? 'تغییر به حالت روشن' : 'تغییر به حالت تاریک');
         });
     }
-    
+
     // Persist theme preference
     if (chrome.storage && chrome.storage.local) {
         chrome.storage.local.set({ cxTheme: isDark ? 'dark' : 'light' });
@@ -130,13 +130,13 @@ function _closeOverlay(overlay) {
     if (!overlay || overlay._cxClosing) return;
     overlay._cxClosing = true; // Prevent double-close
     overlay.classList.add('cx-modal-fade-out');
-    
+
     // Remove the ESC key listener if one was attached
     if (overlay._cxEscHandler) {
         document.removeEventListener('keydown', overlay._cxEscHandler);
         overlay._cxEscHandler = null;
     }
-    
+
     setTimeout(() => overlay.remove(), 300);
 }
 
@@ -152,14 +152,14 @@ function _closeOverlay(overlay) {
  */
 function _attachModalCloseBehavior(overlay, closeFn) {
     const doClose = closeFn || (() => _closeOverlay(overlay));
-    
+
     // Backdrop click: close only if the click target is the overlay itself (not a child)
     overlay.addEventListener('click', (e) => {
         if (e.target === overlay) {
             doClose();
         }
     });
-    
+
     // ESC key listener (attached to document so it works regardless of focus)
     const escHandler = (e) => {
         if (e.key === 'Escape') {
@@ -535,7 +535,7 @@ function resolveChaparStatus(statusInput) {
  */
 function renderTrackingModal(data, waybill, customerName, backContext) {
     const root = getExtensionRoot();
-    
+
     // Remove existing modal if one is already open
     const existingModal = root.querySelector('.cx-modal-overlay');
     if (existingModal) {
@@ -769,7 +769,7 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
 
     const skipKeys = [
         'history', 'geo', 'internalId', 'packageIds', 'manifestItems', 'isDelivered', 'isPostal', 'isPublicOnly',
-        'deliveryDateSource', 'classification', 'portalWaybill', 'portalOrigin', 
+        'deliveryDateSource', 'classification', 'portalWaybill', 'portalOrigin',
         'portalDest', 'portalService', 'portalStatus', 'portalSender', 'portalReceiver',
         'signature', 'payment_link', 'attach', 'delivery_time', 'deliveredInfo'
     ];
@@ -826,14 +826,26 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
         if (isPkg || label === 'شماره بسته' || label === 'کد رهگیری احتمالی') {
             return `
                 <div class="cx-package-card" role="region" aria-label="${_esc(label)}">
-                    <div class="cx-package-card-main">
-                        <span class="cx-package-card-icon" aria-hidden="true">📦</span>
-                        <div class="cx-package-card-text">
-                            <span class="cx-package-card-label">${_esc(label)}:</span>
-                            <span class="cx-package-card-value">${_esc(val)}</span>
+                    <div class="cx-package-card-top">
+                        <div class="cx-package-card-main">
+                            <span class="cx-package-card-icon" aria-hidden="true">📦</span>
+                            <div class="cx-package-card-text">
+                                <span class="cx-package-card-label">${_esc(label)}:</span>
+                                <span class="cx-package-card-value">${_esc(val)}</span>
+                            </div>
                         </div>
+                        <button type="button" class="cx-package-card-copy" data-copy="${_esc(val)}" title="کپی ${_esc(label)}" aria-label="کپی ${_esc(label)}">📋 کپی</button>
                     </div>
-                    <button type="button" class="cx-package-card-copy" data-copy="${_esc(val)}" title="کپی ${_esc(label)}" aria-label="کپی ${_esc(label)}">📋 کپی</button>
+                    <div class="cx-package-card-actions">
+                        <button type="button" class="cx-track-action-btn cx-track-chapar-btn" data-query="${_esc(val)}" title="رهگیری مرسوله در سامانه عمومی چاپار" aria-label="رهگیری در چاپار">
+                            <span class="cx-track-btn-icon" aria-hidden="true">🌐</span>
+                            <span>چاپار</span>
+                        </button>
+                        <button type="button" class="cx-track-action-btn cx-track-post-btn" data-query="${_esc(val)}" title="رهگیری مرسوله در سامانه رهگیری پست" aria-label="رهگیری در پست">
+                            <span class="cx-track-btn-icon" aria-hidden="true">📮</span>
+                            <span>پست</span>
+                        </button>
+                    </div>
                 </div>
             `;
         }
@@ -856,7 +868,7 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
         if (data[key] === null || data[key] === '' || data[key] === '-') return;
         const label = knownTranslations[key];
         if (!label || alreadyRenderedLabels.has(label)) return;
-        
+
         metaHTML += _renderMetaCard(label, data[key]);
     });
 
@@ -864,9 +876,9 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     let logs = Array.isArray(data.history) ? [...data.history] : [];
     const currentStatus = logs.length > 0 ? (logs[0].status || 'در حال پیگیری') : 'وضعیت نامشخص';
     let timelineHTML = '';
-    
+
     logs.forEach((log, index) => {
-        const isLatest = index === 0; 
+        const isLatest = index === 0;
         const displayDate = log.date || '';
         const displayStatus = log.status || 'ثبت در سیستم';
         const displayLoc = log.loc || '';
@@ -875,14 +887,14 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
         Object.keys(log).forEach(key => {
             if (['date', 'status', 'loc', 'timestamp_date', 'sortKey', 'geo', 'row'].includes(key)) return;
             if (!log[key] || typeof log[key] === 'object' || log[key] === '-') return;
-            
+
             let keyFa = key;
             if (key === 'agent' || key === 'by' || key === 'operator') keyFa = 'توسط';
             if (key === 'package_no' || key === 'package') keyFa = 'بسته';
             if (key === 'receiver') keyFa = 'تحویل گیرنده';
             if (key === 'rep' || key === 'branch') keyFa = 'نماینده';
             if (key === 'action') keyFa = 'دستور';
-            
+
             extraDetails += `<span class="cx-log-tag"><strong>${_esc(keyFa)}:</strong> ${_esc(log[key])}</span>`;
         });
 
@@ -927,7 +939,6 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
                 <button class="cx-btn cx-btn-secondary" id="cx-copy-waybill" aria-label="کپی شماره بارنامه">📋 کپی بارنامه</button>
                 <button class="cx-btn cx-btn-primary" id="cx-copy-logs" aria-label="کپی گزارش">کپی گزارش</button>
                 ${data.postalTrackingNumber ? `<button class="cx-btn cx-btn-primary" id="cx-footer-post-btn" aria-label="رهگیری در پست">📮 رهگیری پست</button>` : ''}
-                <button class="cx-btn cx-btn-secondary" id="cx-open-public-track-btn" aria-label="رهگیری در سامانه عمومی چاپار">🌐 سامانه عمومی</button>
                 <button class="cx-btn cx-btn-chapar" id="cx-open-chapar" aria-label="پورتال چاپار">🔗 پورتال چاپار</button>
                 <button class="cx-theme-toggle" id="cx-theme-toggle-modal" aria-label="${_getThemeAriaLabel()}" title="${_getThemeAriaLabel()}">${_getThemeIcon()}</button>
             </div>
@@ -983,16 +994,6 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
         });
     }
 
-    // --- Open Public Chapar Tracking handler ---
-    const openPublicTrackBtn = root.querySelector('#cx-open-public-track-btn');
-    if (openPublicTrackBtn) {
-        openPublicTrackBtn.addEventListener('click', () => {
-            chrome.runtime.sendMessage({
-                action: 'OPEN_PUBLIC_CHAPAR_TAB',
-                query: waybill
-            });
-        });
-    }
 
     // --- Copy Report ---
     root.querySelector('#cx-copy-logs').addEventListener('click', () => {
@@ -1001,7 +1002,7 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
             const byText = l.agent || l.by ? ` [توسط: ${l.agent || l.by}]` : '';
             return `${l.date} - ${l.status}${locText}${byText}`;
         }).join('\n');
-        
+
         navigator.clipboard.writeText(logText).then(() => {
             const copyBtn = root.querySelector('#cx-copy-logs');
             copyBtn.innerText = 'کپی شد! ✅';
@@ -1013,7 +1014,7 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
             setTimeout(() => copyBtn.innerText = 'کپی گزارش', 2000);
         });
     });
-    
+
     // --- Copy Waybill Number ---
     root.querySelector('#cx-copy-waybill').addEventListener('click', () => {
         if (!waybill) {
@@ -1051,7 +1052,35 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
         });
     });
 
-    
+    // --- Quick Tracking: Chapar ---
+    root.querySelectorAll('.cx-track-chapar-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const query = btn.getAttribute('data-query');
+            if (query) {
+                chrome.runtime.sendMessage({
+                    action: 'OPEN_PUBLIC_CHAPAR_TAB',
+                    query: query
+                });
+            }
+        });
+    });
+
+    // --- Quick Tracking: Post ---
+    root.querySelectorAll('.cx-track-post-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const query = btn.getAttribute('data-query');
+            if (query) {
+                chrome.runtime.sendMessage({
+                    action: 'OPEN_POST_TAB',
+                    query: query
+                });
+            }
+        });
+    });
+
+
     // --- Open in Chapar Portal ---
     root.querySelector('#cx-open-chapar').addEventListener('click', () => {
         if (!waybill) {
@@ -1066,7 +1095,7 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
             waybill: waybill
         });
     });
-    
+
     // --- Theme toggle in modal ---
     root.querySelector('#cx-theme-toggle-modal').addEventListener('click', () => {
         toggleTheme();
@@ -1078,7 +1107,7 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
  */
 function renderAuthErrorModal() {
     const root = getExtensionRoot();
-    
+
     const existingModal = root.querySelector('.cx-modal-overlay');
     if (existingModal) {
         if (existingModal._cxEscHandler) {
@@ -1089,7 +1118,7 @@ function renderAuthErrorModal() {
 
     const overlay = document.createElement('div');
     overlay.className = 'cx-modal-overlay';
-    
+
     overlay.innerHTML = `
         <div class="cx-modal cx-modal-error">
             <div class="cx-modal-icon">🔒</div>
@@ -1107,13 +1136,13 @@ function renderAuthErrorModal() {
     root.querySelector('#cx-close-modal').addEventListener('click', () => {
         _closeOverlay(overlay);
     });
-    
+
     root.querySelector('#cx-login-chapar').addEventListener('click', () => {
         // Open Chapar in a new tab so they can login. 
         window.open('https://portal.chaparnet.com', '_blank');
         _closeOverlay(overlay);
     });
-    
+
     // Backdrop click + ESC key close
     _attachModalCloseBehavior(overlay);
 }
@@ -1130,7 +1159,7 @@ function getBadgeClass(status) {
  */
 function renderPhoneListModal(waybills, phone, customerName) {
     const root = getExtensionRoot();
-    
+
     const existingModal = root.querySelector('.cx-modal-overlay');
     if (existingModal) {
         if (existingModal._cxEscHandler) {
@@ -1141,7 +1170,7 @@ function renderPhoneListModal(waybills, phone, customerName) {
 
     const overlay = document.createElement('div');
     overlay.className = 'cx-modal-overlay';
-    
+
     let listHTML = '';
     waybills.forEach(w => {
         const wInfo = resolveChaparStatus(w.status);
@@ -1190,10 +1219,10 @@ function renderPhoneListModal(waybills, phone, customerName) {
     root.querySelector('#cx-close-modal').addEventListener('click', () => {
         _closeOverlay(overlay);
     });
-    
+
     // Backdrop click + ESC key close
     _attachModalCloseBehavior(overlay);
-    
+
     // Theme toggle in list modal
     root.querySelector('#cx-theme-toggle-list').addEventListener('click', () => {
         toggleTheme();
@@ -1204,10 +1233,10 @@ function renderPhoneListModal(waybills, phone, customerName) {
     selectButtons.forEach(btn => {
         btn.addEventListener('click', async (e) => {
             const selectedWaybill = e.target.getAttribute('data-waybill');
-            
+
             const originalText = e.target.innerText;
             e.target.innerHTML = `<div class="cx-spinner"></div> صبر کنید...`;
-            
+
             const response = await new Promise(resolve => {
                 chrome.runtime.sendMessage({
                     action: 'FETCH_CHAPAR',
