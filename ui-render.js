@@ -1329,6 +1329,13 @@ async function renderShortcutSettingsModal(onSave) {
 
     const registry = window.CX_SHORTCUTS?.registry || [];
     const enabledIds = await (window.CX_SHORTCUTS?.getEnabledShortcuts() || Promise.resolve(['returns', 'manual_refunds', 'admin_orders']));
+    const isAlways100 = await (window.CX_SHORTCUTS?.getAlways100 ? window.CX_SHORTCUTS.getAlways100() : new Promise(resolve => {
+        if (chrome?.storage?.local) {
+            chrome.storage.local.get(['cxAlways100'], res => resolve(!!res?.cxAlways100));
+        } else {
+            resolve(false);
+        }
+    }));
 
     let itemsHTML = '';
     registry.forEach(s => {
@@ -1353,15 +1360,28 @@ async function renderShortcutSettingsModal(onSave) {
         <div class="cx-modal" role="dialog" aria-modal="true" aria-labelledby="cx-settings-title" style="max-width: 500px;">
             <div class="cx-modal-header">
                 <div>
-                    <h2 class="cx-modal-title" id="cx-settings-title">⚙️ تنظیمات میانبرهای اتوموبی</h2>
-                    <div class="cx-modal-subtitle">انتخاب بخش‌های فعال در نوار دستیار هوشمند</div>
+                    <h2 class="cx-modal-title" id="cx-settings-title">⚙️ تنظیمات دستیار اتوموبی</h2>
+                    <div class="cx-modal-subtitle">سفارشی‌سازی میانبرها و نمایش داده‌ها</div>
                 </div>
             </div>
             
-            <div class="cx-modal-body" style="background: var(--cx-bg-modal-body);">
+            <div class="cx-modal-body" style="background: var(--cx-bg-modal-body); max-height: 480px; overflow-y: auto;">
+                <div class="cx-settings-section-title" style="margin-bottom: 8px; font-weight: 700; font-size: 12px; color: var(--cx-text-secondary);">میانبرهای فعال در نوار دستیار</div>
                 <div class="cx-settings-list">
                     ${itemsHTML}
                 </div>
+
+                <div class="cx-settings-section-title" style="margin: 16px 0 8px; font-weight: 700; font-size: 12px; color: var(--cx-text-secondary);">صفحه‌بندی و جدول‌ها</div>
+                <label class="cx-settings-item" for="cx-setting-always-100">
+                    <div class="cx-settings-item-info">
+                        <span style="font-size: 20px;">📄</span>
+                        <div>
+                            <div class="cx-settings-item-title">نمایش دائمی 100 آیتم</div>
+                            <div class="cx-settings-item-desc">تنظیم خودکار تعداد سطرهای جدول روی ۱۰۰ آیتم در تمام بخش‌ها</div>
+                        </div>
+                    </div>
+                    <input type="checkbox" class="cx-settings-checkbox" id="cx-setting-always-100" ${isAlways100 ? 'checked' : ''}>
+                </label>
             </div>
             
             <div class="cx-modal-footer">
@@ -1380,7 +1400,7 @@ async function renderShortcutSettingsModal(onSave) {
     });
 
     overlay.querySelector('#cx-settings-save').addEventListener('click', async () => {
-        const checkboxes = overlay.querySelectorAll('.cx-settings-checkbox');
+        const checkboxes = overlay.querySelectorAll('.cx-settings-checkbox[data-id]');
         const selected = [];
         checkboxes.forEach(cb => {
             if (cb.checked) {
@@ -1388,14 +1408,27 @@ async function renderShortcutSettingsModal(onSave) {
             }
         });
 
+        const always100Checked = !!overlay.querySelector('#cx-setting-always-100')?.checked;
+
         if (window.CX_SHORTCUTS && typeof window.CX_SHORTCUTS.setEnabledShortcuts === 'function') {
             await window.CX_SHORTCUTS.setEnabledShortcuts(selected);
+        }
+        if (window.CX_SHORTCUTS && typeof window.CX_SHORTCUTS.setAlways100 === 'function') {
+            await window.CX_SHORTCUTS.setAlways100(always100Checked);
+        } else if (chrome?.storage?.local) {
+            await chrome.storage.local.set({ cxAlways100: always100Checked });
+        }
+
+        // Apply immediately to DOM state
+        document.documentElement.setAttribute('data-cx-always-100', always100Checked ? 'true' : 'false');
+        if (always100Checked) {
+            window.dispatchEvent(new CustomEvent('cx-apply-page-size-100'));
         }
 
         _closeOverlay(overlay);
 
         if (typeof onSave === 'function') {
-            onSave(selected);
+            onSave(selected, always100Checked);
         }
     });
 }

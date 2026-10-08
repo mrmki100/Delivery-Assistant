@@ -449,6 +449,30 @@
         });
     }
 
+    async function getAlways100() {
+        return new Promise(resolve => {
+            if (chrome?.storage?.local) {
+                chrome.storage.local.get(['cxAlways100'], res => {
+                    resolve(!!res?.cxAlways100);
+                });
+            } else {
+                resolve(false);
+            }
+        });
+    }
+
+    async function setAlways100(enabled) {
+        return new Promise(resolve => {
+            if (chrome?.storage?.local) {
+                chrome.storage.local.set({ cxAlways100: !!enabled }, () => {
+                    resolve();
+                });
+            } else {
+                resolve();
+            }
+        });
+    }
+
     // ==========================================
     // 7. BACKGROUND STATUS ORCHESTRATOR
     // ==========================================
@@ -533,6 +557,8 @@
         getOrderContext,
         getEnabledShortcuts,
         setEnabledShortcuts,
+        getAlways100,
+        setAlways100,
         triggerShortcut,
         onStatusUpdate,
         safeFillInput,

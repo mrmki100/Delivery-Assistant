@@ -248,4 +248,119 @@
         }
     }, true);
 
+    // ==========================================
+    // 6. ALWAYS 100 ITEMS PAGE-SIZE AUTOMATION
+    // ==========================================
+    let isApplyingPageSize = false;
+    let lastAppliedTime = 0;
+
+    function applyPageSize100() {
+        if (document.documentElement.getAttribute('data-cx-always-100') !== 'true') return false;
+        if (isApplyingPageSize) return false;
+
+        const now = Date.now();
+        if (now - lastAppliedTime < 800) return false;
+
+        const pagination = document.querySelector('.MuiTablePagination-root');
+        if (!pagination) return false;
+
+        const input = pagination.querySelector('.MuiTablePagination-input input');
+        const select = pagination.querySelector('.MuiTablePagination-select');
+        const currentVal = input ? String(input.value).trim() : (select ? select.innerText.trim() : '');
+
+        // If it's already 100, do nothing!
+        if (currentVal === '100') return false;
+
+        isApplyingPageSize = true;
+        lastAppliedTime = now;
+
+        try {
+            // Method 1: React Props synthetic event (Immediate, clean, zero popover flicker)
+            if (input) {
+                let inputProps = null;
+                for (const k in input) {
+                    if (k.startsWith('__reactProps')) {
+                        inputProps = input[k];
+                        break;
+                    }
+                }
+                if (inputProps && typeof inputProps.onChange === 'function') {
+                    inputProps.onChange({ target: { value: 100, name: input.name } });
+                    isApplyingPageSize = false;
+                    return true;
+                }
+            }
+
+            // Method 2: DOM fallback (simulate dropdown selection)
+            const trigger = select || pagination.querySelector('.MuiTablePagination-input');
+            if (trigger) {
+                trigger.click();
+                setTimeout(() => {
+                    const listbox = document.querySelector('ul[role="listbox"], [role="listbox"]');
+                    if (listbox) {
+                        const opt100 = listbox.querySelector('li[data-value="100"]')
+                            || Array.from(listbox.querySelectorAll('li')).find(li => li.innerText.trim() === '100');
+                        if (opt100) {
+                            opt100.click();
+                        } else {
+                            const backdrop = document.querySelector('.MuiBackdrop-root');
+                            if (backdrop) backdrop.click();
+                        }
+                    }
+                    isApplyingPageSize = false;
+                }, 50);
+                return true;
+            }
+        } catch (err) {
+            // Silently ignore non-critical errors
+        } finally {
+            setTimeout(() => { isApplyingPageSize = false; }, 500);
+        }
+        return false;
+    }
+
+    // Listen for custom apply event from content script or settings
+    window.addEventListener('cx-apply-page-size-100', () => {
+        applyPageSize100();
+    });
+
+    // Observe DOM mutations for newly rendered MuiTablePagination elements
+    let paginationDebounce = null;
+    const paginationObserver = new MutationObserver(() => {
+        if (document.documentElement.getAttribute('data-cx-always-100') !== 'true') return;
+        if (paginationDebounce) return;
+        paginationDebounce = setTimeout(() => {
+            paginationDebounce = null;
+            applyPageSize100();
+        }, 150);
+    });
+    const targetRoot = document.body || document.documentElement;
+    if (targetRoot) {
+        paginationObserver.observe(targetRoot, { childList: true, subtree: true });
+    }
+
+    // React router SPA navigation hooks
+    const originalPushState = history.pushState;
+    if (originalPushState) {
+        history.pushState = function() {
+            const ret = originalPushState.apply(this, arguments);
+            setTimeout(applyPageSize100, 250);
+            return ret;
+        };
+    }
+    const originalReplaceState = history.replaceState;
+    if (originalReplaceState) {
+        history.replaceState = function() {
+            const ret = originalReplaceState.apply(this, arguments);
+            setTimeout(applyPageSize100, 250);
+            return ret;
+        };
+    }
+    window.addEventListener('popstate', () => {
+        setTimeout(applyPageSize100, 250);
+    });
+
+    // Initial load check
+    setTimeout(applyPageSize100, 500);
+
 })();

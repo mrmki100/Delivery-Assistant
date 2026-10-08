@@ -115,9 +115,40 @@
         root.appendChild(panel);
     }
 
+    // Synchronize Always 100 setting with MAIN world via DOM attribute & custom event
+    if (chrome?.storage?.local) {
+        chrome.storage.local.get(['cxAlways100'], res => {
+            const enabled = !!res?.cxAlways100;
+            document.documentElement.setAttribute('data-cx-always-100', enabled ? 'true' : 'false');
+            if (enabled) {
+                window.dispatchEvent(new CustomEvent('cx-apply-page-size-100'));
+            }
+        });
+
+        chrome.storage.onChanged.addListener((changes, area) => {
+            if (area === 'local' && changes.cxAlways100) {
+                const enabled = !!changes.cxAlways100.newValue;
+                document.documentElement.setAttribute('data-cx-always-100', enabled ? 'true' : 'false');
+                if (enabled) {
+                    window.dispatchEvent(new CustomEvent('cx-apply-page-size-100'));
+                }
+            }
+        });
+    }
+
     // Keep the panel alive (helps against React re-renders wiping the DOM)
     setInterval(() => {
         ensurePanelExists();
+
+        // Check if pagination exists and needs to be set to 100
+        if (document.documentElement.getAttribute('data-cx-always-100') === 'true') {
+            const pagInput = document.querySelector('.MuiTablePagination-input input');
+            const pagSelect = document.querySelector('.MuiTablePagination-select');
+            const currentVal = pagInput ? String(pagInput.value).trim() : (pagSelect ? pagSelect.innerText.trim() : '');
+            if (currentVal && currentVal !== '100') {
+                window.dispatchEvent(new CustomEvent('cx-apply-page-size-100'));
+            }
+        }
     }, 1000);
 
     // ==========================================
