@@ -144,6 +144,55 @@ sequenceDiagram
    - If Chapar's `third_reference` or any package identifier (`packageIds`) contains 20–24 digits, it is classified as `POSTAL_HANDOFF`.
    - If marked as postal (`method === '11'` or service containing `'پستی'`) but lacks a 24-digit barcode, it is classified as `POSTAL_PENDING` (*«در انتظار صدور بارکد پستی»*).
 
+### 5.3. Chapar PACKAGE_LIST / manifest_item & «کد رهگیری احتمالی»
+
+1. **Source of this Value:**
+   - Emitted inside the deepest authenticated Chapar consignment history popup (`FormConsignmentHistory`), fetched via xajax from `portal.chaparnet.com/index.php?P=Operation&Tab=Consignment`.
+   - Structural container: `<div id="PACKAGE_LIST">`.
+   - Item element: `<div class="manifest_item">`.
+
+2. **Field Meaning & Operational Semantics:**
+   - This identifier represents a package/manifest item identifier exposed in Chapar's internal database.
+   - **Crucial Rule:** It is **NOT** automatically classified as an official postal tracking number.
+   - It does **NOT** alter the shipment classification engine (`classifyShipment`).
+   - It does **NOT** trigger automatic routing to Iran Post (`tracking.post.ir`).
+
+3. **Exact User-Facing Label:**
+   - **`کد رهگیری احتمالی`**
+   - The UI displays:
+     ```text
+     کد رهگیری احتمالی: <IDENTIFIER>
+     ```
+   - Labels such as *Package ID*, *Package List*, *Postal Tracking Number*, or *کد رهگیری پست* are explicitly forbidden for this field.
+
+4. **Rationale for the Neutral Label:**
+   - The label `"کد رهگیری احتمالی"` was intentionally chosen because while this manifest identifier frequently correlates with downstream external tracking numbers, it may or may not ultimately correspond to a valid, activated external courier barcode. Surfacing it neutrally gives the operator full operational awareness without making false system assumptions.
+
+5. **Discovery Reference DOM Structure:**
+   ```html
+   <div id="PACKAGE_LIST"
+        style="width:300px;height:165px;padding:2px;font-weight:bold;float:left;font-size:30px;line-height:30px;border:1px solid black;overflow:scroll">
+       <div id="<IDENTIFIER>"
+            class="manifest_item"
+            style="cursor:pointer;">
+           <IDENTIFIER>
+       </div>
+   </div>
+   ```
+
+6. **End-to-End Data Flow:**
+   ```text
+   Chapar detail (FormConsignmentHistory popup)
+            ↓
+   PACKAGE_LIST / manifest_item
+            ↓
+   extractChaparManifestItems() in background.js
+            ↓
+   internal data model (manifestItems, probableTrackingNumber)
+            ↓
+   extension details UI (renderTrackingModal -> "کد رهگیری احتمالی")
+   ```
+
 ---
 
 ## 6. Accessibility & W3C Standards Compliance

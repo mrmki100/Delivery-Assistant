@@ -23,19 +23,28 @@ User clicks "📦 چاپار: [Waybill]" button
 **(ASYNC BRANCH 1)**: `fetch('https://app.krch.ir/v1/tracking')` for metadata
 **(ASYNC BRANCH 2)**: `fetch('.../Consignment.php')` to get Internal DB ID from Chapar Portal
     ↓
-Wait for Internal ID. If found, `fetch('.../ConsignmentHistory.php')` to get detailed tracking logs.
+Wait for Internal ID. If found, parallel query via `Promise.allSettled`:
+- `fetch('.../ConsignmentItems.php')` to extract package numbers.
+- `fetch('.../ConsignmentHistory.php')` to extract detailed timeline logs.
+- `fetchChaparConsignmentPopup(internalId)` via xajax (`DrawPopupForm`) to extract detailed popup metadata.
     ↓
-`parseSloppyJSON()` cleans the heavily malformed PHP JSON output
+`parseChaparPopupHTML()` scans the server-rendered HTML:
+- Finds `<div id="PACKAGE_LIST">` and all `<div class="manifest_item">` elements.
+- Preserves all manifest item identifiers into array `manifestItems`.
+- Normalizes identifiers to ASCII digits.
+- Sets internal property `probableTrackingNumber` (joined by comma if multiple, null if absent).
     ↓
-JSON Metadata and History are merged into a single `finalResponse` object
+Status, metadata, and history are merged into a single `finalResponse` object (cached in 45s memory cache).
     ↓
 `background.js` responds to message with `{ success: true, data: finalResponse }`
     ↓
-`content.js` receives response
+`content.js` receives response (verifies monotonic sequence `currentRoutingSeq` to prevent stale UI overwrite).
     ↓
 Calls `renderTrackingModal(data)` in `ui-render.js`
     ↓
-DOM is updated with the custom visual timeline.
+DOM is updated with the custom visual timeline and metadata grid:
+- If `data.probableTrackingNumber` exists, renders compact metadata item with exact label **«کد رهگیری احتمالی»**.
+- If absent, field is cleanly omitted without placeholders.
 
 ---
 

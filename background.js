@@ -618,6 +618,39 @@ function parseChaparPopupHTML(rawHtml) {
     const recvMatch = html.match(/<td[^>]*>\s*گیرنده:\s*<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
     const senderMatch = html.match(/<td[^>]*>\s*فرستنده:\s*<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
 
+    // Extract PACKAGE_LIST / manifest_item entries from the detailed popup
+    const extractManifestItems = (srcHtml) => {
+        if (!srcHtml) return [];
+        const items = [];
+        const addItem = (rawVal) => {
+            if (!rawVal) return;
+            const val = toAsciiDigits(strip(rawVal)).trim();
+            if (val && !items.includes(val)) items.push(val);
+        };
+        const manifestClassRegex = /<[^>]*\bclass=["'][^"']*\bmanifest_item\b[^"']*["'][^>]*>([\s\S]*?)<\/[a-zA-Z0-9]+>/gi;
+        let m;
+        while ((m = manifestClassRegex.exec(srcHtml)) !== null) {
+            addItem(m[1]);
+        }
+        if (items.length === 0) {
+            const idRegex1 = /<[^>]*\bclass=["'][^"']*\bmanifest_item\b[^"']*["'][^>]*\bid=["']([^"']+)["'][^>]*>/gi;
+            while ((m = idRegex1.exec(srcHtml)) !== null) addItem(m[1]);
+            const idRegex2 = /<[^>]*\bid=["']([^"']+)["'][^>]*\bclass=["'][^"']*\bmanifest_item\b[^"']*["'][^>]*>/gi;
+            while ((m = idRegex2.exec(srcHtml)) !== null) addItem(m[1]);
+        }
+        if (items.length === 0 && srcHtml.includes('PACKAGE_LIST')) {
+            const pkgListIdx = srcHtml.indexOf('PACKAGE_LIST');
+            const pkgScope = srcHtml.slice(pkgListIdx, pkgListIdx + 4000);
+            const divRegex = /<div\b[^>]*\bid=["'](\d+)["'][^>]*>([\s\S]*?)<\/div>/gi;
+            while ((m = divRegex.exec(pkgScope)) !== null) {
+                if (m[1] !== 'PACKAGE_LIST') addItem(m[1] || m[2]);
+            }
+        }
+        return items;
+    };
+
+    const manifestItems = extractManifestItems(html);
+
     return {
         maxDeliveryTime: maxDeliveryMatch ? maxDeliveryMatch[1].trim() : null,
         paymentMethod: getTdAfter('روش پرداخت'),
@@ -637,7 +670,8 @@ function parseChaparPopupHTML(rawHtml) {
         isDelivered: isDelivered,
         deliveredInfo: deliveredMatch ? strip(deliveredMatch[1]) : null,
         receiver: recvMatch ? strip(recvMatch[1]) : null,
-        sender: senderMatch ? strip(senderMatch[1]) : null
+        sender: senderMatch ? strip(senderMatch[1]) : null,
+        manifestItems: manifestItems
     };
 }
 
@@ -879,6 +913,10 @@ async function handleChaparFetch(data) {
                 internalId: internalId,
                 packageNo: packageNo || (packageIds.length > 0 ? packageIds[0] : null),
                 packageIds: packageIds,
+                manifestItems: popupData?.manifestItems || [],
+                probableTrackingNumber: (popupData?.manifestItems && popupData.manifestItems.length > 0)
+                    ? popupData.manifestItems.join('، ')
+                    : null,
                 origin: popupData?.origin || portalMetadata.origin || null,
                 dest: popupData?.dest || portalMetadata.dest || null,
                 service: popupData?.method || portalMetadata.service || null,

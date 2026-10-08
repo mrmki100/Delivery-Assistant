@@ -24,5 +24,23 @@
 - **Data Format:** Form URL Encoded Body. Returns "Sloppy" JSON.
 - **Failure Scenario:** Fails if `INTERNAL_ID` was not successfully extracted in the previous step.
 
+## 4. Chapar Deep Detailed Consignment Popup & PACKAGE_LIST (Portal)
+- **Endpoint:** `POST https://portal.chaparnet.com/index.php?P=Operation&Tab=Consignment` (via xajax `DrawPopupForm`)
+- **Payload:** `FormName=FormConsignmentHistory&variables[no]=[INTERNAL_ID]`
+- **Purpose:** Fetches the deepest server-rendered consignment popup containing pickup details, operational dockets, and the manifest package list.
+- **DOM Structure Discovered:**
+  ```html
+  <div id="PACKAGE_LIST" style="...">
+      <div id="<IDENTIFIER>" class="manifest_item" style="cursor:pointer;">
+          <IDENTIFIER>
+      </div>
+  </div>
+  ```
+- **Field Semantics:** Represents an internal Chapar manifest/package item identifier.
+- **Operational Classification Rule:**
+  - Must **NOT** be automatically classified as an Iran Post tracking number.
+  - Surfaced to the operator under the strict, neutral label **«کد رهگیری احتمالی»**.
+  - All identifiers preserved in clean ASCII/Latin digits.
+
 ## External Assumptions
 The extension heavily assumes the DOM structure of `panel.automoby.ir` (MuiDataGrid classes and `data-field` attributes) and the HTML output of `tracking.post.ir`. If these external sites update their frontends, the DOM scraping logic will break.

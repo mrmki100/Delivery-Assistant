@@ -596,8 +596,22 @@
         const name = document.documentElement.getAttribute('data-cx-test-name') || '';
         
         // Validate inputs before executing
-        const allowedTypes = ['ConsignmentNo', 'گیرنده'];
+        const allowedTypes = ['ConsignmentNo', 'گیرنده', 'TEST_RENDER_MODAL'];
         if (!allowedTypes.includes(type)) return;
+
+        if (type === 'TEST_RENDER_MODAL') {
+            const rawMock = document.documentElement.getAttribute('data-cx-test-mock');
+            if (rawMock && typeof renderTrackingModal === 'function') {
+                try {
+                    const mockData = JSON.parse(rawMock);
+                    renderTrackingModal(mockData, mockData.waybill || '54807199275779101', name || 'تست');
+                    document.documentElement.setAttribute('data-cx-test-status', 'completed');
+                } catch (e) {
+                    document.documentElement.setAttribute('data-cx-test-status', 'error: ' + e.message);
+                }
+            }
+            return;
+        }
         
         const query = toAsciiDigits(rawQuery || '').trim();
         if (!/^[0-9a-zA-Z%_\-\+]{3,40}$/.test(query)) return;

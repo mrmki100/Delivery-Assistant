@@ -679,6 +679,7 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     // 3. DYNAMIC METADATA GRID
     let metaHTML = '';
     const knownTranslations = {
+        'probableTrackingNumber': 'کد رهگیری احتمالی',
         'maxDeliveryTime': 'حداکثر زمان تحویل',
         'deliveryDate': 'زمان دقیق تحویل',
         'deliveredTo': 'تحویل گیرنده',
@@ -710,7 +711,7 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     };
 
     const skipKeys = [
-        'history', 'geo', 'internalId', 'packageIds', 'isDelivered', 'isPostal', 'isPublicOnly',
+        'history', 'geo', 'internalId', 'packageIds', 'manifestItems', 'isDelivered', 'isPostal', 'isPublicOnly',
         'deliveryDateSource', 'classification', 'portalWaybill', 'portalOrigin', 
         'portalDest', 'portalService', 'portalStatus', 'portalSender', 'portalReceiver',
         'signature', 'payment_link', 'attach', 'delivery_time', 'deliveredInfo'
@@ -723,6 +724,9 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     }
     if (data.maxDeliveryTime) {
         priorityItems.push({ label: 'حداکثر زمان تحویل', value: data.maxDeliveryTime });
+    }
+    if (data.probableTrackingNumber) {
+        priorityItems.push({ label: 'کد رهگیری احتمالی', value: data.probableTrackingNumber });
     }
     if (data.weight) {
         priorityItems.push({ label: 'وزن (کیلوگرم)', value: data.weight });
