@@ -356,6 +356,14 @@
     margin-top: 4px;
 }
 
+.cx-waybill-badge {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace, 'Tahoma';
+    font-weight: 700;
+    color: var(--cx-text-primary);
+    direction: ltr;
+    unicode-bidi: isolate;
+}
+
 .cx-status-badge {
     padding: 6px 12px;
     border-radius: 20px;
@@ -1073,6 +1081,114 @@
     color: var(--cx-text-primary);
     font-weight: 700;
     word-break: break-word;
+}
+
+/* Dedicated Package / Waybill Number Card */
+.cx-package-card {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    margin: 4px 0;
+    background: #ffffff;
+    border: 1.5px solid #cbd5e1;
+    border-inline-start: 4px solid #6f2cf6;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+:host(.cx-dark) .cx-package-card {
+    background: #1e1e2e;
+    border-color: #3a3a52;
+    border-inline-start-color: #9061f9;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.cx-package-card-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.cx-package-card-icon {
+    font-size: 16px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.cx-package-card-text {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.cx-package-card-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--cx-text-secondary);
+}
+
+:host(.cx-dark) .cx-package-card-label {
+    color: #cbd5e1;
+}
+
+.cx-package-card-value {
+    font-size: 14px;
+    font-weight: 800;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace, 'Tahoma';
+    letter-spacing: 0.5px;
+    color: var(--cx-text-primary);
+    direction: ltr;
+    unicode-bidi: isolate;
+    word-break: break-all;
+}
+
+:host(.cx-dark) .cx-package-card-value {
+    color: #f8fafc;
+}
+
+.cx-package-card-copy {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: inherit;
+    color: var(--cx-text-secondary);
+    background: var(--cx-bg-tertiary);
+    border: 1px solid var(--cx-border-medium);
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.cx-package-card-copy:hover {
+    background: var(--cx-bg-hover);
+    color: var(--cx-text-primary);
+    border-color: #94a3b8;
+}
+
+:host(.cx-dark) .cx-package-card-copy {
+    background: #2a2a3d;
+    border-color: #3a3a52;
+    color: #b0b0c8;
+}
+
+:host(.cx-dark) .cx-package-card-copy:hover {
+    background: #35354d;
+    border-color: #4a4a62;
+    color: #ffffff;
 }
 
 /* Responsive adjustments for smaller screens */

@@ -562,7 +562,7 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
                 <div class="cx-modal-header">
                     <div>
                         <h2 class="cx-modal-title">پیگیری مرسوله چاپار</h2>
-                        <div class="cx-modal-subtitle">${_esc(customerName || '')} | ${_esc(waybill)}</div>
+                        <div class="cx-modal-subtitle">${_esc(customerName || '')} | <span class="cx-waybill-badge">${_esc(waybill)}</span></div>
                     </div>
                     <div class="cx-status-badge badge-primary">🌐 سامانه عمومی چاپار</div>
                 </div>
@@ -783,7 +783,7 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
         priorityItems.push({ label: 'حداکثر زمان تحویل', value: data.maxDeliveryTime });
     }
     if (data.probableTrackingNumber) {
-        priorityItems.push({ label: 'کد رهگیری احتمالی', value: data.probableTrackingNumber });
+        priorityItems.push({ label: 'کد رهگیری احتمالی', value: data.probableTrackingNumber, isPackage: true });
     }
     if (data.weight) {
         priorityItems.push({ label: 'وزن (کیلوگرم)', value: data.weight });
@@ -811,7 +811,7 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
         priorityItems.push({ label: 'کد رهگیری پست', value: data.postalTrackingNumber });
     }
     if (data.packageNo && data.packageNo !== waybill) {
-        priorityItems.push({ label: 'شماره بسته', value: data.packageNo });
+        priorityItems.push({ label: 'شماره بسته', value: data.packageNo, isPackage: true });
     }
     if (data.origin) priorityItems.push({ label: 'مبدا', value: data.origin });
     if (data.dest) priorityItems.push({ label: 'مقصد', value: data.dest });
@@ -822,13 +822,31 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     if (data.modifiedAt) priorityItems.push({ label: 'آخرین تغییر', value: data.modifiedAt });
     if (data.service || data.portalService) priorityItems.push({ label: 'نوع خدمات', value: data.service || data.portalService });
 
-    priorityItems.forEach(item => {
-        metaHTML += `
+    function _renderMetaCard(label, val, isPkg) {
+        if (isPkg || label === 'شماره بسته' || label === 'کد رهگیری احتمالی') {
+            return `
+                <div class="cx-package-card" role="region" aria-label="${_esc(label)}">
+                    <div class="cx-package-card-main">
+                        <span class="cx-package-card-icon" aria-hidden="true">📦</span>
+                        <div class="cx-package-card-text">
+                            <span class="cx-package-card-label">${_esc(label)}:</span>
+                            <span class="cx-package-card-value">${_esc(val)}</span>
+                        </div>
+                    </div>
+                    <button type="button" class="cx-package-card-copy" data-copy="${_esc(val)}" title="کپی ${_esc(label)}" aria-label="کپی ${_esc(label)}">📋 کپی</button>
+                </div>
+            `;
+        }
+        return `
             <div class="cx-meta-item">
-                <div class="cx-meta-label">${_esc(item.label)}</div>
-                <div class="cx-meta-value">${_esc(item.value)}</div>
+                <div class="cx-meta-label">${_esc(label)}</div>
+                <div class="cx-meta-value">${_esc(val)}</div>
             </div>
         `;
+    }
+
+    priorityItems.forEach(item => {
+        metaHTML += _renderMetaCard(item.label, item.value, item.isPackage);
     });
 
     // Other non-skipped metadata
@@ -839,12 +857,7 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
         const label = knownTranslations[key];
         if (!label || alreadyRenderedLabels.has(label)) return;
         
-        metaHTML += `
-            <div class="cx-meta-item">
-                <div class="cx-meta-label">${_esc(label)}</div>
-                <div class="cx-meta-value">${_esc(data[key])}</div>
-            </div>
-        `;
+        metaHTML += _renderMetaCard(label, data[key]);
     });
 
     // 4. TIMELINE GENERATION (Chronologically sorted with newest at top)
@@ -894,7 +907,7 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
             <div class="cx-modal-header">
                 <div>
                     <h2 class="cx-modal-title">پیگیری مرسوله چاپار</h2>
-                    <div class="cx-modal-subtitle">${_esc(customerName || '')} | ${_esc(waybill)}</div>
+                    <div class="cx-modal-subtitle">${_esc(customerName || '')} | <span class="cx-waybill-badge">${_esc(waybill)}</span></div>
                 </div>
                 <div class="cx-status-badge ${statusInfo.badgeClass}" role="status" aria-label="${_esc(statusInfo.ariaLabel)}">${statusInfo.icon} ${_esc(statusInfo.labelFa)}</div>
             </div>
@@ -1020,6 +1033,24 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
             setTimeout(() => btn.innerText = '📋 کپی بارنامه', 2000);
         });
     });
+
+    // --- Copy Package Number handler ---
+    root.querySelectorAll('.cx-package-card-copy').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const textToCopy = btn.getAttribute('data-copy');
+            if (textToCopy && navigator.clipboard) {
+                navigator.clipboard.writeText(textToCopy).then(() => {
+                    const orig = btn.innerText;
+                    btn.innerText = 'کپی شد! ✅';
+                    setTimeout(() => { btn.innerText = orig; }, 2000);
+                }).catch(err => {
+                    console.warn('Clipboard copy failed', err);
+                });
+            }
+        });
+    });
+
     
     // --- Open in Chapar Portal ---
     root.querySelector('#cx-open-chapar').addEventListener('click', () => {
