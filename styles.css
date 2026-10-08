@@ -1315,3 +1315,8 @@
         grid-template-columns: 1fr;
     }
 }
+
+/* --- Admin Orders: Hide Pending Payment --- */
+.cx-pending-payment-row {
+    display: none !important;
+}

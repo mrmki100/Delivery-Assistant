@@ -1336,6 +1336,13 @@ async function renderShortcutSettingsModal(onSave) {
             resolve(false);
         }
     }));
+    const isHidePending = await (window.CX_SHORTCUTS?.getHidePendingPayment ? window.CX_SHORTCUTS.getHidePendingPayment() : new Promise(resolve => {
+        if (chrome?.storage?.local) {
+            chrome.storage.local.get(['cxHidePendingPayment'], res => resolve(!!res?.cxHidePendingPayment));
+        } else {
+            resolve(false);
+        }
+    }));
 
     let itemsHTML = '';
     registry.forEach(s => {
@@ -1372,16 +1379,29 @@ async function renderShortcutSettingsModal(onSave) {
                 </div>
 
                 <div class="cx-settings-section-title" style="margin: 16px 0 8px; font-weight: 700; font-size: 12px; color: var(--cx-text-secondary);">صفحه‌بندی و جدول‌ها</div>
-                <label class="cx-settings-item" for="cx-setting-always-100">
-                    <div class="cx-settings-item-info">
-                        <span style="font-size: 20px;">📄</span>
-                        <div>
-                            <div class="cx-settings-item-title">نمایش دائمی 100 آیتم</div>
-                            <div class="cx-settings-item-desc">تنظیم خودکار تعداد سطرهای جدول روی ۱۰۰ آیتم در تمام بخش‌ها</div>
+                <div class="cx-settings-list">
+                    <label class="cx-settings-item" for="cx-setting-always-100">
+                        <div class="cx-settings-item-info">
+                            <span style="font-size: 20px;">📄</span>
+                            <div>
+                                <div class="cx-settings-item-title">نمایش دائمی 100 آیتم</div>
+                                <div class="cx-settings-item-desc">تنظیم خودکار تعداد سطرهای جدول روی ۱۰۰ آیتم در تمام بخش‌ها</div>
+                            </div>
                         </div>
-                    </div>
-                    <input type="checkbox" class="cx-settings-checkbox" id="cx-setting-always-100" ${isAlways100 ? 'checked' : ''}>
-                </label>
+                        <input type="checkbox" class="cx-settings-checkbox" id="cx-setting-always-100" ${isAlways100 ? 'checked' : ''}>
+                    </label>
+
+                    <label class="cx-settings-item" for="cx-setting-hide-pending">
+                        <div class="cx-settings-item-info">
+                            <span style="font-size: 20px;">🚫</span>
+                            <div>
+                                <div class="cx-settings-item-title">مخفی کردن در انتظار پرداختها</div>
+                                <div class="cx-settings-item-desc">عدم نمایش سفارش‌های پرداخت‌نشده در نتایج جستجوی سفارشات ادمین</div>
+                            </div>
+                        </div>
+                        <input type="checkbox" class="cx-settings-checkbox" id="cx-setting-hide-pending" ${isHidePending ? 'checked' : ''}>
+                    </label>
+                </div>
             </div>
             
             <div class="cx-modal-footer">
@@ -1409,6 +1429,7 @@ async function renderShortcutSettingsModal(onSave) {
         });
 
         const always100Checked = !!overlay.querySelector('#cx-setting-always-100')?.checked;
+        const hidePendingChecked = !!overlay.querySelector('#cx-setting-hide-pending')?.checked;
 
         if (window.CX_SHORTCUTS && typeof window.CX_SHORTCUTS.setEnabledShortcuts === 'function') {
             await window.CX_SHORTCUTS.setEnabledShortcuts(selected);
@@ -1418,6 +1439,11 @@ async function renderShortcutSettingsModal(onSave) {
         } else if (chrome?.storage?.local) {
             await chrome.storage.local.set({ cxAlways100: always100Checked });
         }
+        if (window.CX_SHORTCUTS && typeof window.CX_SHORTCUTS.setHidePendingPayment === 'function') {
+            await window.CX_SHORTCUTS.setHidePendingPayment(hidePendingChecked);
+        } else if (chrome?.storage?.local) {
+            await chrome.storage.local.set({ cxHidePendingPayment: hidePendingChecked });
+        }
 
         // Apply immediately to DOM state
         document.documentElement.setAttribute('data-cx-always-100', always100Checked ? 'true' : 'false');
@@ -1425,10 +1451,13 @@ async function renderShortcutSettingsModal(onSave) {
             window.dispatchEvent(new CustomEvent('cx-apply-page-size-100'));
         }
 
+        document.documentElement.setAttribute('data-cx-hide-pending', hidePendingChecked ? 'true' : 'false');
+        window.dispatchEvent(new CustomEvent('cx-apply-pending-filter'));
+
         _closeOverlay(overlay);
 
         if (typeof onSave === 'function') {
-            onSave(selected, always100Checked);
+            onSave(selected, { always100: always100Checked, hidePending: hidePendingChecked });
         }
     });
 }

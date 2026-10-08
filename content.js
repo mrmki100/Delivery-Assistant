@@ -115,22 +115,46 @@
         root.appendChild(panel);
     }
 
-    // Synchronize Always 100 setting with MAIN world via DOM attribute & custom event
+    // Inject stylesheet to cleanly hide marked pending-payment rows in host DOM
+    function ensurePendingFilterStyle() {
+        if (document.getElementById('cx-pending-filter-style')) return;
+        const style = document.createElement('style');
+        style.id = 'cx-pending-filter-style';
+        style.textContent = `
+            html[data-cx-hide-pending="true"] .MuiDataGrid-row.cx-pending-payment-row {
+                display: none !important;
+            }
+        `;
+        (document.head || document.documentElement).appendChild(style);
+    }
+    ensurePendingFilterStyle();
+
+    // Synchronize settings with MAIN world and DOM attributes
     if (chrome?.storage?.local) {
-        chrome.storage.local.get(['cxAlways100'], res => {
-            const enabled = !!res?.cxAlways100;
-            document.documentElement.setAttribute('data-cx-always-100', enabled ? 'true' : 'false');
-            if (enabled) {
+        chrome.storage.local.get(['cxAlways100', 'cxHidePendingPayment'], res => {
+            const always100 = !!res?.cxAlways100;
+            const hidePending = !!res?.cxHidePendingPayment;
+            document.documentElement.setAttribute('data-cx-always-100', always100 ? 'true' : 'false');
+            document.documentElement.setAttribute('data-cx-hide-pending', hidePending ? 'true' : 'false');
+            if (always100) {
                 window.dispatchEvent(new CustomEvent('cx-apply-page-size-100'));
             }
+            filterPendingPaymentOrders();
         });
 
         chrome.storage.onChanged.addListener((changes, area) => {
-            if (area === 'local' && changes.cxAlways100) {
-                const enabled = !!changes.cxAlways100.newValue;
-                document.documentElement.setAttribute('data-cx-always-100', enabled ? 'true' : 'false');
-                if (enabled) {
-                    window.dispatchEvent(new CustomEvent('cx-apply-page-size-100'));
+            if (area === 'local') {
+                if (changes.cxAlways100) {
+                    const enabled = !!changes.cxAlways100.newValue;
+                    document.documentElement.setAttribute('data-cx-always-100', enabled ? 'true' : 'false');
+                    if (enabled) {
+                        window.dispatchEvent(new CustomEvent('cx-apply-page-size-100'));
+                    }
+                }
+                if (changes.cxHidePendingPayment) {
+                    const enabled = !!changes.cxHidePendingPayment.newValue;
+                    document.documentElement.setAttribute('data-cx-hide-pending', enabled ? 'true' : 'false');
+                    filterPendingPaymentOrders();
                 }
             }
         });
@@ -139,6 +163,7 @@
     // Keep the panel alive (helps against React re-renders wiping the DOM)
     setInterval(() => {
         ensurePanelExists();
+        ensurePendingFilterStyle();
 
         // Check if pagination exists and needs to be set to 100
         if (document.documentElement.getAttribute('data-cx-always-100') === 'true') {
@@ -149,6 +174,9 @@
                 window.dispatchEvent(new CustomEvent('cx-apply-page-size-100'));
             }
         }
+
+        // Apply pending-payment filter in Admin Orders
+        filterPendingPaymentOrders();
     }, 1000);
 
     // ==========================================
@@ -247,10 +275,54 @@
                     }
                 }
             });
+            // Apply pending payment filtering scoped to Admin Orders (/parcel/)
+            filterPendingPaymentOrders();
         } catch (err) {
             // Non-critical cache update error
         }
     }
+
+    /**
+     * Filters/hides orders with status "در انتظار پرداخت" in Admin Orders (/parcel/).
+     * Operates purely at the display/DOM layer using synchronized CSS class tagging.
+     */
+    function filterPendingPaymentOrders() {
+        if (!window.location.pathname.startsWith('/parcel')) return;
+
+        const isEnabled = document.documentElement.getAttribute('data-cx-hide-pending') === 'true';
+        const rows = document.querySelectorAll('.MuiDataGrid-row');
+        if (!rows || rows.length === 0) return;
+
+        if (!isEnabled) {
+            rows.forEach(r => {
+                if (r.classList.contains('cx-pending-payment-row')) {
+                    r.classList.remove('cx-pending-payment-row');
+                }
+            });
+            return;
+        }
+
+        const pendingIds = new Set();
+        rows.forEach(row => {
+            const stateCell = row.querySelector('[data-field="state"]');
+            if (stateCell && stateCell.innerText.trim() === 'در انتظار پرداخت') {
+                const id = row.getAttribute('data-id');
+                if (id) pendingIds.add(id);
+            }
+        });
+
+        rows.forEach(row => {
+            const id = row.getAttribute('data-id');
+            if (id && pendingIds.has(id)) {
+                row.classList.add('cx-pending-payment-row');
+            } else {
+                row.classList.remove('cx-pending-payment-row');
+            }
+        });
+    }
+
+    // Listen for manual trigger from settings modal
+    window.addEventListener('cx-apply-pending-filter', filterPendingPaymentOrders);
 
     // Update cache immediately on initialization
     updateRowCacheFromDOM();

@@ -473,6 +473,30 @@
         });
     }
 
+    async function getHidePendingPayment() {
+        return new Promise(resolve => {
+            if (chrome?.storage?.local) {
+                chrome.storage.local.get(['cxHidePendingPayment'], res => {
+                    resolve(!!res?.cxHidePendingPayment);
+                });
+            } else {
+                resolve(false);
+            }
+        });
+    }
+
+    async function setHidePendingPayment(enabled) {
+        return new Promise(resolve => {
+            if (chrome?.storage?.local) {
+                chrome.storage.local.set({ cxHidePendingPayment: !!enabled }, () => {
+                    resolve();
+                });
+            } else {
+                resolve();
+            }
+        });
+    }
+
     // ==========================================
     // 7. BACKGROUND STATUS ORCHESTRATOR
     // ==========================================
@@ -559,6 +583,8 @@
         setEnabledShortcuts,
         getAlways100,
         setAlways100,
+        getHidePendingPayment,
+        setHidePendingPayment,
         triggerShortcut,
         onStatusUpdate,
         safeFillInput,
