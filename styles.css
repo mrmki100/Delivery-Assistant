@@ -784,7 +784,7 @@
 
 .cx-shortcut-btn {
     height: 34px;
-    padding: 0 12px;
+    padding: 0 10px;
     background: var(--cx-bg-secondary);
     color: var(--cx-text-primary);
     border: 1px solid var(--cx-border-medium);
@@ -798,7 +798,15 @@
     gap: 6px;
     transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
     white-space: nowrap;
-    line-height: 32px;
+    box-sizing: border-box;
+    line-height: normal;
+}
+
+.cx-shortcut-btn > span:first-child {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    line-height: 1;
 }
 
 .cx-shortcut-btn:hover {
@@ -808,13 +816,26 @@
     box-shadow: 0 4px 10px rgba(111, 44, 246, 0.12);
 }
 
+.cx-shortcut-btn:focus-visible {
+    outline: 2px solid #6F2CF6;
+    outline-offset: 2px;
+}
+
 .cx-shortcut-badge {
-    padding: 2px 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 20px;
+    min-width: 18px;
+    padding: 0 6px;
     border-radius: 10px;
     font-size: 10px;
-    font-weight: 800;
-    display: inline-block;
+    font-weight: 700;
+    line-height: 1;
+    box-sizing: border-box;
+    white-space: nowrap;
     transition: all 0.2s ease;
+    flex-shrink: 0;
 }
 
 .cx-shortcut-badge.badge-active {
@@ -852,6 +873,12 @@
     background: #fee2e2;
     color: #b91c1c;
     border: 1px solid #fecaca;
+}
+
+:host(.cx-dark) .cx-shortcut-badge.badge-error {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.35);
 }
 
 @keyframes cx-pulse {
