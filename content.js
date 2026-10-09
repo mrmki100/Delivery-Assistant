@@ -302,18 +302,23 @@
             return;
         }
 
-        const pendingIds = new Set();
+        const pendingIds = [];
         rows.forEach(row => {
             const stateCell = row.querySelector('[data-field="state"]');
             if (stateCell && stateCell.innerText.trim() === 'در انتظار پرداخت') {
                 const id = row.getAttribute('data-id');
-                if (id) pendingIds.add(id);
+                if (id && !pendingIds.includes(id)) {
+                    pendingIds.push(id);
+                }
             }
         });
 
+        // Keep exactly ONE matching pending-payment order visible in the current list; hide the remaining
+        const hideIds = new Set(pendingIds.slice(1));
+
         rows.forEach(row => {
             const id = row.getAttribute('data-id');
-            if (id && pendingIds.has(id)) {
+            if (id && hideIds.has(id)) {
                 row.classList.add('cx-pending-payment-row');
             } else {
                 row.classList.remove('cx-pending-payment-row');
