@@ -62,18 +62,29 @@
 
         panel.innerHTML = `
             <div class="cx-floating-bar-info">
-                <div class="cx-badge-ai">🤖 دستیار هوشمند</div>
-                <div class="cx-customer-name" id="chapar-name">👇 روی ردیف کلیک کنید 👇</div>
-                <div class="cx-order-chip" id="cx-order-chip" style="display: none;"></div>
+                <div class="cx-info-top">
+                    <span class="cx-badge-ai">🤖 دستیار هوشمند</span>
+                    <span class="cx-order-chip" id="cx-order-chip" style="display: none;"></span>
+                </div>
+                <div class="cx-customer-name" id="chapar-name" title="مشتری فعال">👇 روی ردیف کلیک کنید 👇</div>
             </div>
+
+            <div class="cx-bar-divider" aria-hidden="true"></div>
 
             <div class="cx-shortcuts-container" id="cx-shortcuts-bar"></div>
             
-            <div class="cx-button-group">
+            <div class="cx-bar-divider" aria-hidden="true"></div>
+
+            <div class="cx-tracking-group">
+                <button class="cx-btn-trigger" id="btn-phone" disabled aria-label="شماره موبایل گیرنده" title="شماره موبایل گیرنده">📱 موبایل: منتظر...</button>
+                <button class="cx-btn-trigger" id="btn-waybill" disabled aria-label="رهگیری بارنامه" title="رهگیری بارنامه">📦 بارنامه: منتظر...</button>
+            </div>
+
+            <div class="cx-bar-divider" aria-hidden="true"></div>
+
+            <div class="cx-utilities-group">
+                <button class="cx-settings-toggle" id="cx-settings-toggle-bar" aria-label="تنظیمات افزونه" title="تنظیمات افزونه">⚙️</button>
                 <button class="cx-theme-toggle" id="cx-theme-toggle-bar" aria-label="${themeAriaLabel}" title="${themeAriaLabel}">${themeIcon}</button>
-                <button class="cx-settings-toggle" id="cx-settings-toggle-bar" aria-label="تنظیمات میانبرها" title="تنظیمات میانبرها">⚙️</button>
-                <button class="cx-btn-trigger" id="btn-phone" disabled>📱 موبایل: منتظر...</button>
-                <button class="cx-btn-trigger" id="btn-waybill" disabled>📦 بارنامه: منتظر...</button>
             </div>
         `;
 
@@ -285,7 +296,11 @@
     /**
      * Filters/hides orders with status "در انتظار پرداخت" in Admin Orders (/parcel/).
      * Operates purely at the display/DOM layer using synchronized CSS class tagging.
+     * Preserves exactly ONE pending-payment order visible per applicable result list.
      */
+    let lastResultListKey = '';
+    let keptPendingIdForCurrentList = null;
+
     function filterPendingPaymentOrders() {
         if (!window.location.pathname.startsWith('/parcel')) return;
 
@@ -294,6 +309,8 @@
         if (!rows || rows.length === 0) return;
 
         if (!isEnabled) {
+            keptPendingIdForCurrentList = null;
+            lastResultListKey = '';
             rows.forEach(r => {
                 if (r.classList.contains('cx-pending-payment-row')) {
                     r.classList.remove('cx-pending-payment-row');
@@ -302,26 +319,49 @@
             return;
         }
 
-        const pendingIds = [];
+        // Identify whether the current search result list has changed (e.g. new query, page change)
+        const row0 = document.querySelector('.MuiDataGrid-row[data-rowindex="0"]');
+        const row0Id = row0 ? row0.getAttribute('data-id') : null;
+        const currentListKey = window.location.pathname + window.location.search + (row0Id ? `:${row0Id}` : '');
+
+        if (row0Id && currentListKey !== lastResultListKey) {
+            lastResultListKey = currentListKey;
+            keptPendingIdForCurrentList = null;
+        }
+
+        // Collect all pending orders currently rendered in the DOM, ordered by data-rowindex
+        const pendingRowsWithIndex = [];
         rows.forEach(row => {
             const stateCell = row.querySelector('[data-field="state"]');
             if (stateCell && stateCell.innerText.trim() === 'در انتظار پرداخت') {
                 const id = row.getAttribute('data-id');
-                if (id && !pendingIds.includes(id)) {
-                    pendingIds.push(id);
+                const rawIdx = row.getAttribute('data-rowindex');
+                const rIndex = rawIdx !== null ? parseInt(rawIdx, 10) : 999999;
+                if (id && !pendingRowsWithIndex.some(p => p.id === id)) {
+                    pendingRowsWithIndex.push({ id, rIndex });
                 }
             }
         });
 
-        // Keep exactly ONE matching pending-payment order visible in the current list; hide the remaining
-        const hideIds = new Set(pendingIds.slice(1));
+        pendingRowsWithIndex.sort((a, b) => a.rIndex - b.rIndex);
 
+        // Lock the single kept pending order for this result list (lowest rowindex)
+        if (!keptPendingIdForCurrentList && pendingRowsWithIndex.length > 0) {
+            keptPendingIdForCurrentList = pendingRowsWithIndex[0].id;
+        }
+
+        const pendingIds = new Set(pendingRowsWithIndex.map(p => p.id));
+
+        // Synchronously tag rows: pinned and main rows sharing the same ID stay strictly synced
         rows.forEach(row => {
             const id = row.getAttribute('data-id');
-            if (id && hideIds.has(id)) {
-                row.classList.add('cx-pending-payment-row');
-            } else {
-                row.classList.remove('cx-pending-payment-row');
+            if (!id) return;
+            if (pendingIds.has(id)) {
+                if (id === keptPendingIdForCurrentList) {
+                    row.classList.remove('cx-pending-payment-row');
+                } else {
+                    row.classList.add('cx-pending-payment-row');
+                }
             }
         });
     }
@@ -332,9 +372,13 @@
     // Update cache immediately on initialization
     updateRowCacheFromDOM();
 
-    // Throttled scroll listener to prevent main thread blocking
+    // Scroll listener: runs immediate synchronous filter on scroll to eliminate rendering lag/flicker
     let scrollThrottleTimeout = null;
     window.addEventListener('scroll', () => {
+        if (window.location.pathname.startsWith('/parcel') && document.documentElement.getAttribute('data-cx-hide-pending') === 'true') {
+            filterPendingPaymentOrders();
+        }
+
         if (scrollThrottleTimeout) return;
         scrollThrottleTimeout = setTimeout(() => {
             scrollThrottleTimeout = null;
@@ -342,9 +386,13 @@
         }, 150);
     }, { capture: true, passive: true });
 
-    // Observe DOM mutations to capture new rows and cells as they enter the grid
+    // Observe DOM mutations: runs immediate synchronous filter during microtask turn BEFORE browser paint!
     let cacheDebounceTimeout = null;
     const gridDomObserver = new MutationObserver(() => {
+        if (window.location.pathname.startsWith('/parcel') && document.documentElement.getAttribute('data-cx-hide-pending') === 'true') {
+            filterPendingPaymentOrders();
+        }
+
         if (cacheDebounceTimeout) return;
         cacheDebounceTimeout = setTimeout(() => {
             cacheDebounceTimeout = null;

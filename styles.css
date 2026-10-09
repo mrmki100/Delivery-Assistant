@@ -139,32 +139,13 @@
     box-sizing: border-box;
 }
 
-/* --- Theme Toggle Button --- */
-.cx-theme-toggle {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    border: 1px solid var(--cx-border-medium);
-    background: var(--cx-bg-tertiary);
-    color: var(--cx-text-secondary);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 16px;
-    transition: all 0.2s ease;
-    padding: 0;
+/* --- Floating Bar Hairline Divider --- */
+.cx-bar-divider {
+    width: 1px;
+    height: 26px;
+    background: var(--cx-border-medium);
     flex-shrink: 0;
-}
-
-.cx-theme-toggle:hover {
-    background: var(--cx-bg-hover);
-    transform: translateY(-1px);
-}
-
-.cx-theme-toggle:focus-visible {
-    outline: 2px solid #6F2CF6;
-    outline-offset: 2px;
+    opacity: 0.8;
 }
 
 /* --- Floating Bar --- */
@@ -178,62 +159,94 @@
     border: 1px solid var(--cx-border-accent);
     border-radius: 12px;
     box-shadow: var(--cx-shadow-bar);
-    padding: 12px 20px;
+    padding: 8px 16px;
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
     transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    max-width: calc(100vw - 100px);
+    z-index: 999999;
 }
 
+/* --- Context Area (Active record) --- */
 .cx-floating-bar-info {
     display: flex;
     flex-direction: column;
     justify-content: center;
-    border-left: 2px solid var(--cx-border-info);
-    padding-left: 16px;
+    min-width: 130px;
+    max-width: 220px;
+    flex-shrink: 0;
+}
+
+.cx-info-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 3px;
 }
 
 .cx-badge-ai {
     background: linear-gradient(135deg, #6F2CF6, #9b63f8);
     color: white;
-    padding: 4px 12px;
+    padding: 2px 8px;
     text-align: center;
     font-weight: 800;
-    font-size: 11px;
-    border-radius: 20px;
-    margin-bottom: 6px;
-    letter-spacing: 0.5px;
+    font-size: 10px;
+    border-radius: 12px;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    display: inline-block;
+}
+
+.cx-order-chip {
+    background: var(--cx-bg-tertiary);
+    color: var(--cx-text-secondary);
+    border: 1px solid var(--cx-border-medium);
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    font-family: 'Consolas', 'Monaco', monospace, 'Tahoma';
+    direction: ltr;
+    unicode-bidi: isolate;
+    white-space: nowrap;
 }
 
 .cx-customer-name {
     color: var(--cx-text-heading);
     font-weight: 800;
-    font-size: 13px;
-    text-align: center;
+    font-size: 12px;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.4;
 }
 
-.cx-button-group {
+/* --- Tracking Area (Mobile & Carriers) --- */
+.cx-tracking-group {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
+    flex-shrink: 0;
 }
 
 .cx-btn-trigger {
-    padding: 8px 16px;
+    height: 34px;
+    padding: 0 14px;
     background: var(--cx-bg-tertiary);
     color: var(--cx-text-muted);
     border: 1px solid var(--cx-border-medium);
     border-radius: 8px;
     font-weight: 700;
-    font-size: 13px;
+    font-size: 12px;
     font-family: inherit;
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
     cursor: not-allowed;
     white-space: nowrap;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 6px;
+    line-height: 32px;
 }
 
 .cx-btn-trigger.active-chapar {
@@ -247,6 +260,66 @@
     background: #ffedd5;
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(234, 88, 12, 0.15);
+}
+
+.cx-btn-trigger.active-post {
+    background: #fefce8;
+    color: #a16207;
+    border: 1px solid #fef08a;
+    cursor: pointer;
+}
+
+.cx-btn-trigger.active-post:hover {
+    background: #fef9c3;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(202, 138, 4, 0.15);
+}
+
+.cx-btn-trigger:focus-visible {
+    outline: 2px solid #6F2CF6;
+    outline-offset: 2px;
+}
+
+/* --- Secondary Utilities Area (Settings & Theme) --- */
+.cx-utilities-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.cx-theme-toggle,
+.cx-settings-toggle {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    border: 1px solid var(--cx-border-medium);
+    background: var(--cx-bg-tertiary);
+    color: var(--cx-text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+    padding: 0;
+    flex-shrink: 0;
+    line-height: 1;
+}
+
+.cx-theme-toggle:hover,
+.cx-settings-toggle:hover {
+    background: var(--cx-bg-hover);
+    color: var(--cx-text-primary);
+    border-color: #6F2CF6;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(111, 44, 246, 0.12);
+}
+
+.cx-theme-toggle:focus-visible,
+.cx-settings-toggle:focus-visible {
+    outline: 2px solid #6F2CF6;
+    outline-offset: 2px;
 }
 
 .cx-btn-trigger.active-post {
@@ -709,39 +782,9 @@
     text-align: center;
 }
 
-.cx-settings-toggle {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    border: 1px solid var(--cx-border-medium);
-    background: var(--cx-bg-tertiary);
-    color: var(--cx-text-secondary);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 15px;
-    transition: all 0.2s ease;
-    padding: 0;
-    flex-shrink: 0;
-}
-
-.cx-settings-toggle:hover {
-    background: var(--cx-bg-hover);
-    transform: rotate(45deg);
-}
-
-.cx-shortcuts-container {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    border-right: 2px solid var(--cx-border-info);
-    padding-right: 12px;
-    margin-right: 4px;
-}
-
 .cx-shortcut-btn {
-    padding: 6px 12px;
+    height: 34px;
+    padding: 0 12px;
     background: var(--cx-bg-secondary);
     color: var(--cx-text-primary);
     border: 1px solid var(--cx-border-medium);
@@ -755,6 +798,7 @@
     gap: 6px;
     transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
     white-space: nowrap;
+    line-height: 32px;
 }
 
 .cx-shortcut-btn:hover {
