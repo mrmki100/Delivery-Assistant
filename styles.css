@@ -178,40 +178,6 @@
     flex-shrink: 0;
 }
 
-.cx-info-top {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 3px;
-}
-
-.cx-badge-ai {
-    background: linear-gradient(135deg, #6F2CF6, #9b63f8);
-    color: white;
-    padding: 2px 8px;
-    text-align: center;
-    font-weight: 800;
-    font-size: 10px;
-    border-radius: 12px;
-    letter-spacing: 0.3px;
-    white-space: nowrap;
-    display: inline-block;
-}
-
-.cx-order-chip {
-    background: var(--cx-bg-tertiary);
-    color: var(--cx-text-secondary);
-    border: 1px solid var(--cx-border-medium);
-    padding: 1px 7px;
-    border-radius: 10px;
-    font-size: 10px;
-    font-weight: 700;
-    font-family: 'Consolas', 'Monaco', monospace, 'Tahoma';
-    direction: ltr;
-    unicode-bidi: isolate;
-    white-space: nowrap;
-}
-
 .cx-customer-name {
     color: var(--cx-text-heading);
     font-weight: 800;
@@ -219,7 +185,25 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    line-height: 1.4;
+    line-height: 1.3;
+    margin-bottom: 2px;
+}
+
+.cx-order-chip {
+    display: inline-flex;
+    align-items: center;
+    background: var(--cx-bg-tertiary);
+    color: var(--cx-text-secondary);
+    border: 1px solid var(--cx-border-medium);
+    padding: 1px 7px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    direction: rtl;
+    white-space: nowrap;
+    line-height: 1.3;
+    width: fit-content;
+    max-width: 100%;
 }
 
 /* --- Tracking Area (Mobile & Carriers) --- */
@@ -766,22 +750,8 @@
 }
 
 /* =============================================
-   SHORTCUTS BAR & CONTEXT CHIPS
+   SHORTCUTS BAR & BUTTONS
    ============================================= */
-.cx-order-chip {
-    display: inline-block;
-    background: var(--cx-bg-tertiary);
-    color: var(--cx-text-secondary);
-    border: 1px solid var(--cx-border-medium);
-    padding: 2px 8px;
-    border-radius: 12px;
-    font-size: 11px;
-    font-weight: 700;
-    margin-top: 4px;
-    direction: ltr;
-    text-align: center;
-}
-
 .cx-shortcut-btn {
     height: 34px;
     padding: 0 10px;

@@ -62,11 +62,8 @@
 
         panel.innerHTML = `
             <div class="cx-floating-bar-info">
-                <div class="cx-info-top">
-                    <span class="cx-badge-ai">🤖 دستیار هوشمند</span>
-                    <span class="cx-order-chip" id="cx-order-chip" style="display: none;"></span>
-                </div>
                 <div class="cx-customer-name" id="chapar-name" title="مشتری فعال">👇 روی ردیف کلیک کنید 👇</div>
+                <div class="cx-order-chip" id="cx-order-chip" style="display: none;"></div>
             </div>
 
             <div class="cx-bar-divider" aria-hidden="true"></div>
@@ -578,7 +575,7 @@
         const orderChip = root.querySelector('#cx-order-chip');
         if (orderChip) {
             if (orderId) {
-                orderChip.style.display = 'inline-block';
+                orderChip.style.display = 'inline-flex';
                 orderChip.innerText = `سفارش: #${orderId}`;
             } else {
                 orderChip.style.display = 'none';
