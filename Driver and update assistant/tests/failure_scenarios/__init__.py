@@ -1,0 +1,1 @@
+"""Failure scenarios test package."""

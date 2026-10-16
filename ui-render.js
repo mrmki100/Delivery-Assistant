@@ -754,10 +754,11 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     };
 
     const skipKeys = [
-        'history', 'geo', 'internalId', 'packageIds', 'manifestItems', 'isDelivered', 'isPostal', 'isPublicOnly',
+        'history', 'geo', 'internalId', 'packageIds', 'packageNo', 'manifestItems', 'isDelivered', 'isPostal', 'isPublicOnly',
         'deliveryDateSource', 'classification', 'portalWaybill', 'portalOrigin',
         'portalDest', 'portalService', 'portalStatus', 'portalSender', 'portalReceiver',
-        'signature', 'payment_link', 'attach', 'delivery_time', 'deliveredInfo'
+        'signature', 'payment_link', 'attach', 'delivery_time', 'deliveredInfo',
+        'referenceCause', 'hasReferenceField', 'referenceError', 'thirdCourier', 'thirdCourierName'
     ];
 
     // Priority displayed items first (operational fields)
@@ -774,8 +775,50 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     if (data.maxDeliveryTime) {
         priorityItems.push({ label: 'حداکثر زمان تحویل', value: data.maxDeliveryTime });
     }
-    if (data.probableTrackingNumber) {
-        priorityItems.push({ label: 'کد رهگیری احتمالی', value: data.probableTrackingNumber, isPackage: true });
+
+    // Determine whether to show the non-Chapar waybill / postal tracking reference card
+    const hasReferenceVal = typeof data.referenceCause === 'string' && data.referenceCause.trim().length > 0;
+    const isReferenceConfirmedEmpty = data.hasReferenceField && (!data.referenceCause || data.referenceCause.trim().length === 0);
+    const isRefError = !!data.referenceError;
+    const isPostalOrThirdCourier = !!data.isPostal || !!data.thirdCourier || (data.packageNo && data.packageNo !== waybill);
+    const shouldDisplayReferenceCard = hasReferenceVal || isReferenceConfirmedEmpty || isRefError || isPostalOrThirdCourier;
+
+    if (shouldDisplayReferenceCard) {
+        let displayVal = '';
+        let isEmptyRef = false;
+        let cardTitle = '';
+
+        if (hasReferenceVal) {
+            displayVal = data.referenceCause.trim();
+            isEmptyRef = false;
+        } else if (isRefError) {
+            displayVal = 'خطا در دریافت اطلاعات رهگیری';
+            isEmptyRef = true;
+            cardTitle = 'خطا در برقراری ارتباط با پورتال چاپار';
+        } else if (data.hasReferenceField === false && !isPostalOrThirdCourier) {
+            displayVal = 'عدم دسترسی به فیلد رهگیری';
+            isEmptyRef = true;
+            cardTitle = 'فیلد بارنامه غیر چاپاری در صفحه یافت نشد';
+        } else {
+            // Confirmed empty or postal shipment where tracking number is not yet issued
+            displayVal = 'کد رهگیری ندارد یا هنوز صادر نشده';
+            isEmptyRef = true;
+            cardTitle = 'بارنامه غیر چاپاری صادر نشده یا ثبت نشده است';
+        }
+
+        priorityItems.push({
+            label: 'شماره بارنامه‌های غیر چاپاری',
+            value: displayVal,
+            isPackage: true,
+            isReferenceCause: true,
+            isEmptyRef: isEmptyRef,
+            rawReference: hasReferenceVal ? displayVal : '',
+            cardTitle: cardTitle
+        });
+    }
+
+    if (data.probableTrackingNumber && (!hasReferenceVal || data.probableTrackingNumber !== data.referenceCause)) {
+        priorityItems.push({ label: 'کد رهگیری احتمالی', value: data.probableTrackingNumber, isPackage: !shouldDisplayReferenceCard });
     }
     if (data.weight) {
         priorityItems.push({ label: 'وزن (کیلوگرم)', value: data.weight });
@@ -799,11 +842,8 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     if (data.paymentMethod || data.payment_method) {
         priorityItems.push({ label: 'روش پرداخت', value: data.paymentMethod || data.payment_method });
     }
-    if (data.postalTrackingNumber) {
+    if (data.postalTrackingNumber && (!hasReferenceVal || data.postalTrackingNumber !== data.referenceCause)) {
         priorityItems.push({ label: 'کد رهگیری پست', value: data.postalTrackingNumber });
-    }
-    if (data.packageNo && data.packageNo !== waybill) {
-        priorityItems.push({ label: 'شماره بسته', value: data.packageNo, isPackage: true });
     }
     if (data.origin) priorityItems.push({ label: 'مبدا', value: data.origin });
     if (data.dest) priorityItems.push({ label: 'مقصد', value: data.dest });
@@ -814,8 +854,24 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     if (data.modifiedAt) priorityItems.push({ label: 'آخرین تغییر', value: data.modifiedAt });
     if (data.service || data.portalService) priorityItems.push({ label: 'نوع خدمات', value: data.service || data.portalService });
 
-    function _renderMetaCard(label, val, isPkg) {
-        if (isPkg || label === 'شماره بسته' || label === 'کد رهگیری احتمالی') {
+    function _renderMetaCard(item) {
+        const label = (typeof item === 'object' && item !== null) ? item.label : arguments[0];
+        const val = (typeof item === 'object' && item !== null) ? item.value : arguments[1];
+        const isPkg = (typeof item === 'object' && item !== null) ? item.isPackage : arguments[2];
+        const isEmptyRef = (typeof item === 'object' && item !== null) ? item.isEmptyRef : false;
+        const rawRef = (typeof item === 'object' && item !== null) ? (item.rawReference || '') : '';
+        const cardTitle = (typeof item === 'object' && item !== null) ? (item.cardTitle || '') : '';
+
+        if (isPkg || label === 'شماره بارنامه‌های غیر چاپاری' || label === 'کد رهگیری احتمالی') {
+            const valClass = isEmptyRef ? 'cx-package-card-value cx-empty-reference' : 'cx-package-card-value';
+            const copyBtnHtml = isEmptyRef ? '' : `
+                <button type="button" class="cx-package-card-copy" data-copy="${_esc(val)}" title="کپی ${_esc(label)}" aria-label="کپی ${_esc(label)}">📋 کپی</button>
+            `;
+            const disabledAttr = isEmptyRef ? 'disabled aria-disabled="true"' : '';
+            const chaparQuery = isEmptyRef ? '' : _esc(rawRef || val);
+            const postQuery = isEmptyRef ? '' : _esc(rawRef || val);
+            const actionTitle = isEmptyRef ? 'کد رهگیری نامعتبر یا صادر نشده' : '';
+
             return `
                 <div class="cx-package-card" role="region" aria-label="${_esc(label)}">
                     <div class="cx-package-card-top">
@@ -823,17 +879,17 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
                             <span class="cx-package-card-icon" aria-hidden="true">📦</span>
                             <div class="cx-package-card-text">
                                 <span class="cx-package-card-label">${_esc(label)}:</span>
-                                <span class="cx-package-card-value">${_esc(val)}</span>
+                                <span class="${valClass}" ${cardTitle ? `title="${_esc(cardTitle)}"` : ''}>${_esc(val)}</span>
                             </div>
                         </div>
-                        <button type="button" class="cx-package-card-copy" data-copy="${_esc(val)}" title="کپی ${_esc(label)}" aria-label="کپی ${_esc(label)}">📋 کپی</button>
+                        ${copyBtnHtml}
                     </div>
                     <div class="cx-package-card-actions">
-                        <button type="button" class="cx-track-action-btn cx-track-chapar-btn" data-query="${_esc(val)}" title="رهگیری مرسوله در سامانه عمومی چاپار" aria-label="رهگیری در چاپار">
+                        <button type="button" class="cx-track-action-btn cx-track-chapar-btn" data-query="${chaparQuery}" ${disabledAttr} title="${isEmptyRef ? actionTitle : 'رهگیری مرسوله در سامانه چاپار'}" aria-label="رهگیری در چاپار">
                             <span class="cx-track-btn-icon" aria-hidden="true">🌐</span>
                             <span>چاپار</span>
                         </button>
-                        <button type="button" class="cx-track-action-btn cx-track-post-btn" data-query="${_esc(val)}" title="رهگیری مرسوله در سامانه رهگیری پست" aria-label="رهگیری در پست">
+                        <button type="button" class="cx-track-action-btn cx-track-post-btn" data-query="${postQuery}" ${disabledAttr} title="${isEmptyRef ? actionTitle : 'رهگیری مرسوله در سامانه رهگیری پست'}" aria-label="رهگیری در پست">
                             <span class="cx-track-btn-icon" aria-hidden="true">📮</span>
                             <span>پست</span>
                         </button>
@@ -850,7 +906,7 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     }
 
     priorityItems.forEach(item => {
-        metaHTML += _renderMetaCard(item.label, item.value, item.isPackage);
+        metaHTML += _renderMetaCard(item);
     });
 
     // Other non-skipped metadata
@@ -963,10 +1019,11 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     const trackPostBtn = root.querySelector('#cx-track-post-modal-btn');
     const footerPostBtn = root.querySelector('#cx-footer-post-btn');
     const handleTrackPost = () => {
-        if (data.postalTrackingNumber) {
+        const postRef = data.referenceCause || data.postalTrackingNumber;
+        if (postRef && postRef.trim()) {
             chrome.runtime.sendMessage({
                 action: 'OPEN_POST_TAB',
-                query: data.postalTrackingNumber
+                query: postRef.trim()
             });
         }
     };
@@ -977,8 +1034,9 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     const copyPostBtn = root.querySelector('#cx-copy-post-modal-btn');
     if (copyPostBtn) {
         copyPostBtn.addEventListener('click', () => {
-            if (data.postalTrackingNumber && navigator.clipboard) {
-                navigator.clipboard.writeText(data.postalTrackingNumber).then(() => {
+            const copyVal = data.referenceCause || data.postalTrackingNumber;
+            if (copyVal && copyVal.trim() && navigator.clipboard) {
+                navigator.clipboard.writeText(copyVal.trim()).then(() => {
                     copyPostBtn.innerText = 'کپی شد! ✅';
                     setTimeout(() => copyPostBtn.innerText = '📋 کپی کد پست', 2000);
                 });
@@ -1031,9 +1089,10 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     root.querySelectorAll('.cx-package-card-copy').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') return;
             const textToCopy = btn.getAttribute('data-copy');
-            if (textToCopy && navigator.clipboard) {
-                navigator.clipboard.writeText(textToCopy).then(() => {
+            if (textToCopy && textToCopy.trim() && navigator.clipboard) {
+                navigator.clipboard.writeText(textToCopy.trim()).then(() => {
                     const orig = btn.innerText;
                     btn.innerText = 'کپی شد! ✅';
                     setTimeout(() => { btn.innerText = orig; }, 2000);
@@ -1048,11 +1107,12 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     root.querySelectorAll('.cx-track-chapar-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') return;
             const query = btn.getAttribute('data-query');
-            if (query) {
+            if (query && query.trim()) {
                 chrome.runtime.sendMessage({
                     action: 'OPEN_PUBLIC_CHAPAR_TAB',
-                    query: query
+                    query: query.trim()
                 });
             }
         });
@@ -1062,11 +1122,12 @@ function renderTrackingModal(data, waybill, customerName, backContext) {
     root.querySelectorAll('.cx-track-post-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') return;
             const query = btn.getAttribute('data-query');
-            if (query) {
+            if (query && query.trim()) {
                 chrome.runtime.sendMessage({
                     action: 'OPEN_POST_TAB',
-                    query: query
+                    query: query.trim()
                 });
             }
         });
@@ -1352,7 +1413,7 @@ async function renderShortcutSettingsModal(onSave) {
                 <div class="cx-settings-item-info">
                     <span style="font-size: 20px;">${s.icon}</span>
                     <div>
-                        <div class="cx-settings-item-title">${_esc(s.title)} (${_esc(s.route)})</div>
+                        <div class="cx-settings-item-title">${_esc(s.title)}</div>
                         <div class="cx-settings-item-desc">${_esc(s.description || '')}</div>
                     </div>
                 </div>
@@ -1395,12 +1456,26 @@ async function renderShortcutSettingsModal(onSave) {
                         <div class="cx-settings-item-info">
                             <span style="font-size: 20px;">🚫</span>
                             <div>
-                                <div class="cx-settings-item-title">مخفی کردن در انتظار پرداختها</div>
+                                <div class="cx-settings-item-title">مخفی کردن در انتظار پرداخت‌ها</div>
                                 <div class="cx-settings-item-desc">عدم نمایش سفارش‌های پرداخت‌نشده در نتایج جستجوی سفارشات ادمین</div>
                             </div>
                         </div>
                         <input type="checkbox" class="cx-settings-checkbox" id="cx-setting-hide-pending" ${isHidePending ? 'checked' : ''}>
                     </label>
+                </div>
+
+                <div class="cx-settings-section-title" style="margin: 16px 0 8px; font-weight: 700; font-size: 12px; color: var(--cx-text-secondary);">وضعیت و به‌روزرسانی افزونه</div>
+                <div class="cx-settings-list">
+                    <div class="cx-settings-item" style="cursor: default;">
+                        <div class="cx-settings-item-info">
+                            <span style="font-size: 20px;">🔄</span>
+                            <div>
+                                <div class="cx-settings-item-title">نسخه فعال: v${chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '19.0'}</div>
+                                <div class="cx-settings-item-desc" id="cx-update-status-desc">مدیریت‌شده توسط دستیار سیستم (Driver & Update Assistant)</div>
+                            </div>
+                        </div>
+                        <button type="button" class="cx-btn cx-btn-secondary" id="cx-check-update-btn" style="padding: 4px 10px; font-size: 11px; white-space: nowrap;">بررسی نسخه</button>
+                    </div>
                 </div>
             </div>
             
@@ -1414,6 +1489,23 @@ async function renderShortcutSettingsModal(onSave) {
     root.appendChild(overlay);
 
     _attachModalCloseBehavior(overlay);
+
+    const checkBtn = overlay.querySelector('#cx-check-update-btn');
+    if (checkBtn) {
+        checkBtn.addEventListener('click', () => {
+            const desc = overlay.querySelector('#cx-update-status-desc');
+            if (desc) desc.textContent = 'در حال ارتباط با دستیار سیستم...';
+            checkBtn.disabled = true;
+            chrome.runtime.sendMessage({ action: 'QUERY_UPDATE_ASSISTANT' }, (resp) => {
+                checkBtn.disabled = false;
+                if (!resp || !resp.success) {
+                    if (desc) desc.textContent = resp?.message || 'دستیار سیستم در دسترس نیست';
+                } else {
+                    if (desc) desc.textContent = 'ارتباط برقرار شد؛ نسخه در حال اجرا تایید شد.';
+                }
+            });
+        });
+    }
 
     overlay.querySelector('#cx-settings-cancel').addEventListener('click', () => {
         _closeOverlay(overlay);

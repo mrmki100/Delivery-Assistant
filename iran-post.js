@@ -1,7 +1,7 @@
 /**
  * iran-post.js
  * Content script specifically for tracking.post.ir
- * Automates tracking number injection and Captcha focus for agents.
+ * Automatically populates the postal tracking number into #txtbSearch and focuses the Captcha field.
  */
 
 (function() {
@@ -16,69 +16,178 @@
             .replace(/[\u0660-\u0669]/g, d => String.fromCharCode(d.charCodeAt(0) - 0x0660 + 48));
     }
 
-    // Retrieve the tracking number passed from Automoby
-    chrome.storage.local.get(['postTrackingTask'], function(result) {
-        const rawTask = result.postTrackingTask;
+    /**
+     * Finds the tracking search input on tracking.post.ir.
+     * The verified primary input is #txtbSearch with placeholder "شماره مرسوله".
+     */
+    function findSearchBox() {
+        return document.getElementById('txtbSearch') ||
+               document.querySelector('input[name="txtbSearch"]') ||
+               document.querySelector('input[placeholder*="شماره مرسوله"]') ||
+               document.querySelector('input[placeholder*="مرسوله"]') ||
+               document.getElementById('txtSearch') ||
+               document.querySelector('input[placeholder*="کد رهگیری"]');
+    }
+
+    /**
+     * Finds the security captcha input on tracking.post.ir.
+     * The verified primary input is #txtCaptcha with placeholder "کد امنیتی را واردنمایید".
+     */
+    function findCaptchaBox() {
+        return document.getElementById('txtCaptcha') ||
+               document.querySelector('input[name="txtCaptcha"]') ||
+               document.querySelector('input[placeholder*="امنیتی"]') ||
+               document.querySelector('input[placeholder*="کد امنیتی"]') ||
+               document.querySelector('input[id*="Captcha" i]');
+    }
+
+    /**
+     * Injects the tracking number into the search box, updates native state,
+     * dispatches input/change events, and focuses the Captcha box.
+     */
+    function populateSearchInput(trackingNo) {
+        const searchBox = findSearchBox();
+        if (!searchBox) return false;
+
+        const captchaBox = findCaptchaBox();
+
+        console.log("🎯 [Delivery Assistant] Target search input found (#" + (searchBox.id || 'unknown') + "). Injecting tracking number:", trackingNo);
+
+        // Native prototype setter to ensure compatibility with any framework/binding
+        searchBox.focus();
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        if (setter) {
+            setter.call(searchBox, trackingNo);
+        } else {
+            searchBox.value = trackingNo;
+        }
+
+        searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+        searchBox.dispatchEvent(new Event('change', { bubbles: true }));
+
+        // Strict post-check verification
+        if (searchBox.value !== trackingNo) {
+            searchBox.value = trackingNo;
+            searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        // Smart Focus: Move focus directly to the Captcha field so operator can immediately type
+        if (captchaBox) {
+            captchaBox.focus();
+            console.log("✍️ [Delivery Assistant] Captcha input focused (#" + (captchaBox.id || 'unknown') + "). Ready for user input.");
+        } else {
+            const allInputs = Array.from(document.querySelectorAll('input[type="text"]'));
+            const searchIndex = allInputs.indexOf(searchBox);
+            if (searchIndex !== -1 && searchIndex + 1 < allInputs.length) {
+                allInputs[searchIndex + 1].focus();
+            }
+        }
+
+        return true;
+    }
+
+    let activeCheckTimer = null;
+    let activeObserver = null;
+
+    function cleanupWaiters() {
+        if (activeCheckTimer) {
+            clearInterval(activeCheckTimer);
+            activeCheckTimer = null;
+        }
+        if (activeObserver) {
+            activeObserver.disconnect();
+            activeObserver = null;
+        }
+    }
+
+    /**
+     * Executes the population task, waiting for the DOM to be ready if needed.
+     */
+    function executeTrackingTask(rawTask) {
         let trackingNo = toAsciiDigits(String(rawTask || '')).trim();
         if (trackingNo && trackingNo.includes('،')) {
             trackingNo = trackingNo.split('،')[0].trim();
         } else if (trackingNo && trackingNo.includes(',')) {
             trackingNo = trackingNo.split(',')[0].trim();
         }
-        
-        if (trackingNo && /^\d{10,30}$/.test(trackingNo)) {
-            console.log("📦 [Delivery Assistant] Found Post Tracking Task:", trackingNo);
-            
-            // Wait for the DOM to be fully ready and the input to appear
-            let attempts = 0;
-            const maxAttempts = 20; // 10 seconds total
 
-            const checkExist = setInterval(function() {
-                attempts++;
-                
-                // Typical IDs used by tracking.post.ir
-                const searchBox = document.getElementById('txtSearch') || document.querySelector('input[type="text"][placeholder*="کد رهگیری"]');
-                const captchaBox = document.getElementById('txtCaptcha') || document.querySelector('input[type="text"][id*="Captcha"], input[type="text"][name*="captcha"]'); 
-                
-                if (searchBox) {
-                    clearInterval(checkExist);
-                    console.log("🎯 [Delivery Assistant] Search input found. Injecting tracking number.");
-                    
-                    // Clear the task immediately to prevent re-runs on refresh
-                    chrome.storage.local.remove(['postTrackingTask']);
-
-                    // Inject the tracking number using native setter
-                    searchBox.focus();
-                    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-                    if (setter) {
-                        setter.call(searchBox, trackingNo);
-                    } else {
-                        searchBox.value = trackingNo;
-                    }
-                    searchBox.dispatchEvent(new Event('input', { bubbles: true }));
-                    searchBox.dispatchEvent(new Event('change', { bubbles: true }));
-                    
-                    // Smart Focus: Move cursor directly to the Captcha field so agent just types
-                    if (captchaBox) {
-                        captchaBox.focus();
-                        console.log("✍️ [Delivery Assistant] Captcha input focused. Waiting for manual input.");
-                    } else {
-                        console.warn("⚠️ [Delivery Assistant] Captcha input not found by ID. Attempting fallback focus.");
-                        const allInputs = Array.from(document.querySelectorAll('input[type="text"]'));
-                        const searchIndex = allInputs.indexOf(searchBox);
-                        if (searchIndex !== -1 && searchIndex + 1 < allInputs.length) {
-                            allInputs[searchIndex + 1].focus();
-                        }
-                    }
-                } else if (attempts >= maxAttempts) {
-                    clearInterval(checkExist);
-                    chrome.storage.local.remove(['postTrackingTask']);
-                    console.error("❌ [Delivery Assistant] Could not find the search input on tracking.post.ir after 10 seconds.");
-                }
-            }, 500);
-        } else if (rawTask) {
-            // Clean up invalid task
+        if (!trackingNo || !/^[0-9a-zA-Z\-_]{8,35}$/.test(trackingNo)) {
             chrome.storage.local.remove(['postTrackingTask']);
+            return false;
+        }
+
+        console.log("📦 [Delivery Assistant] Processing Post Tracking Task:", trackingNo);
+
+        cleanupWaiters();
+
+        // 1. Try immediate population
+        if (populateSearchInput(trackingNo)) {
+            chrome.storage.local.remove(['postTrackingTask']);
+            return true;
+        }
+
+        // 2. If element is not yet in DOM, set up bounded retry and MutationObserver
+        let attempts = 0;
+        const maxAttempts = 40; // 10 seconds total (every 250ms)
+
+        const attemptPopulation = () => {
+            attempts++;
+            if (populateSearchInput(trackingNo)) {
+                cleanupWaiters();
+                chrome.storage.local.remove(['postTrackingTask']);
+                return true;
+            }
+            if (attempts >= maxAttempts) {
+                cleanupWaiters();
+                chrome.storage.local.remove(['postTrackingTask']);
+                console.error("❌ [Delivery Assistant] Could not find the search input on tracking.post.ir after 10 seconds.");
+                return false;
+            }
+            return false;
+        };
+
+        activeCheckTimer = setInterval(attemptPopulation, 250);
+
+        try {
+            activeObserver = new MutationObserver(() => {
+                if (findSearchBox()) {
+                    attemptPopulation();
+                }
+            });
+            activeObserver.observe(document.documentElement || document.body, {
+                childList: true,
+                subtree: true
+            });
+        } catch (e) {
+            console.warn("MutationObserver fallback error:", e.message);
+        }
+
+        return true;
+    }
+
+    // 1. On initial load or reload: check storage
+    chrome.storage.local.get(['postTrackingTask'], function(result) {
+        if (result && result.postTrackingTask) {
+            executeTrackingTask(result.postTrackingTask);
         }
     });
+
+    // 2. Direct message listener from background script for active/reused tabs
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message && message.action === 'INJECT_POST_TRACKING') {
+            console.log("📨 [Delivery Assistant] Received direct injection message:", message.trackingNo);
+            const success = executeTrackingTask(message.trackingNo);
+            sendResponse({ success: true, processed: success });
+            return true;
+        }
+    });
+
+    // 3. Storage change listener for active tabs
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName === 'local' && changes.postTrackingTask && changes.postTrackingTask.newValue) {
+            console.log("🔄 [Delivery Assistant] Detected postTrackingTask storage change:", changes.postTrackingTask.newValue);
+            executeTrackingTask(changes.postTrackingTask.newValue);
+        }
+    });
+
 })();

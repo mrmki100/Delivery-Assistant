@@ -86,4 +86,96 @@
             }
         }
     });
+
+    // ==========================================
+    // PORTAL AUTHENTICATION DETECTION & NOTIFIER
+    // ==========================================
+    function isElementVisible(el) {
+        if (!el) return false;
+        if (el.offsetParent === null && window.getComputedStyle(el).position !== 'fixed') return false;
+        const style = window.getComputedStyle(el);
+        return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    }
+
+    function evaluatePortalAuthState() {
+        const bodyText = document.body ? document.body.innerText : '';
+
+        // Reliable positive operational signals (authenticated employee session)
+        const hasFlexigrid = !!document.querySelector('.flexigrid') || !!document.querySelector('#tbl_cons');
+        const hasOperationUrl = window.location.href.includes('P=Operation') || window.location.href.includes('Tab=Consignment');
+        const hasXajax = typeof window.xajax_DoPHP === 'function';
+        const hasLogout = Array.from(document.querySelectorAll('a')).some(a => {
+            const text = a.innerText.trim();
+            return text === 'خروج' || text.includes('خروج از سامانه') || a.href.includes('Logout') || a.href.includes('logout');
+        }) || /(?:خروج از سامانه|خروج از حساب)/i.test(bodyText);
+        const hasWelcome = bodyText.includes('خوش آمدید') || bodyText.includes('سطح دسترسی') || bodyText.includes('Customer-User');
+        const hasNavMenu = bodyText.includes('عملیات') && (bodyText.includes('حسابداری') || bodyText.includes('گزارشات'));
+
+        const hasEmployeeUI = hasFlexigrid || hasOperationUrl || hasLogout || hasWelcome || hasNavMenu || hasXajax;
+
+        // Login / Unauthenticated signals (exclude hidden background idle dialog inputs like frm_IDLELogin)
+        const visiblePasswords = Array.from(document.querySelectorAll('input[type="password"]')).filter(isElementVisible);
+        const hasVisiblePassword = visiblePasswords.length > 0;
+        const isLoginUrl = (window.location.search.includes('P=Login') || window.location.pathname.includes('/login')) && !hasFlexigrid;
+
+        // True login page: on explicit login URL or visible password input without active employee session
+        const isLoginPage = isLoginUrl || (hasVisiblePassword && !hasWelcome && !hasNavMenu);
+
+        // CRITICAL: Do not infer authenticated merely because login form disappeared!
+        // Must have positive confirmation of employee portal UI without active login prompt.
+        const isAuthenticated = !isLoginPage && hasEmployeeUI;
+
+        return {
+            isPortalTab: true,
+            isLoginPage,
+            isAuthenticated,
+            url: window.location.href
+        };
+    }
+
+    let lastSentAuthState = null;
+
+    function notifyAuthIfChanged() {
+        const status = evaluatePortalAuthState();
+        if (lastSentAuthState === null || lastSentAuthState !== status.isAuthenticated) {
+            lastSentAuthState = status.isAuthenticated;
+            chrome.runtime.sendMessage({
+                action: 'CHAPAR_AUTH_STATE_CHANGED',
+                isAuthenticated: status.isAuthenticated,
+                isLoginPage: status.isLoginPage
+            }).catch(() => {});
+        }
+    }
+
+    // 1. Initial check on load
+    notifyAuthIfChanged();
+
+    // 2. Event-driven observer for SPA / DOM transitions without page reload
+    let authDebounceTimer = null;
+    const authObserver = new MutationObserver(() => {
+        if (authDebounceTimer) clearTimeout(authDebounceTimer);
+        authDebounceTimer = setTimeout(() => {
+            notifyAuthIfChanged();
+        }, 300);
+    });
+
+    if (document.body) {
+        authObserver.observe(document.body, { childList: true, subtree: true });
+    } else {
+        document.addEventListener('DOMContentLoaded', () => {
+            if (document.body) {
+                authObserver.observe(document.body, { childList: true, subtree: true });
+            }
+            notifyAuthIfChanged();
+        });
+    }
+
+    // Listen for portal session ping requests
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+        if (msg.action === 'PING_PORTAL_SESSION') {
+            const status = evaluatePortalAuthState();
+            sendResponse(status);
+            return true;
+        }
+    });
 })();

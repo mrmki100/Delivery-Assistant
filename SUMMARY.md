@@ -197,9 +197,13 @@ sequenceDiagram
 ## 6. Critical Operational Requirements
 
 > [!IMPORTANT]
-> **Active Portal Login Required:**  
-> The extension relies on `credentials: 'include'` to pass session cookies to `portal.chaparnet.com`. If you are logged out of Chapar in your browser, the internal API returns the HTML login page, triggering the error:  
-> `شما باید در تب دیگری در سایت چاپار لاگین باشید`.
+> **Evidence-Based Chapar Authentication & Jira Parity UI:**  
+> The extension verifies active sessions on `portal.chaparnet.com` using `analyzeChaparPortalAuth`. If the user is unauthenticated (HTTP 401/403, redirect to login, password input field, or Persian login prompts), the extension:
+> 1. Displays the exact Jira login-required UI: changes the Chapar button into the red `.cx-jira-error-badge` with `"⚠️ نیاز به ورود"`.
+> 2. Provides a `"ورود ↗"` link to `https://portal.chaparnet.com` and a `"🔄"` in-place retry button.
+> 3. Never misrepresents an authentication failure as a "shipment not found" error.
+> 4. Never silently falls back to public Chapar tracking when the user is logged out (public tracking is strictly gated to confirmed `AUTHENTICATED` sessions with 0 rows returned).
+> 5. Recovers automatically upon successful login and retry without requiring an extension reload or page refresh.
 
 > [!CAUTION]
 > **Do Not Remove `parseSloppyJSON`:**  
@@ -209,7 +213,12 @@ sequenceDiagram
 
 ## 7. Current Project Status
 
-- **Phone Search:** Working and parsed reliably.
-- **Waybill Tracking:** Working with full chronological checkpoint history.
-- **Firewall Bypass:** Working via Declarative Net Request.
+- **Version Reconciliation:** Workspace and `Delivery Assistant 2.2 - Copy` compared and reconciled; identified and resolved the subtle regression where `{page:1,total:0,rows:[]}` was falsely evaluated as `AUTHENTICATED`.
+- **Chapar Authentication Detection:** Reconciled with decoupled pre-flight verification (`checkChaparAuthStatus`) and corrected Flexigrid classification (`analyzeChaparPortalAuth` treats empty 0-row JSON as `UNKNOWN`).
+- **Jira Login-Required UI Parity:** Exact parity implemented using `.cx-jira-error-badge`, `"⚠️ نیاز به ورود"`, `"ورود ↗"`, and `"🔄"`, with independent sequence guards and separate auth states.
+- **Public Tracking Gating:** Strictly separated; only offered for verified `AUTHENTICATED` lookups returning 0 rows without session expiry.
+- **Phone Search & Waybill Tracking:** Fully operational with hybrid metadata and chronological history.
+- **Firewall Bypass:** Working via Declarative Net Request header injection.
+- **Automated Test Suite:** 33/33 tests passing via `node --test tests/*.test.mjs` (covering Tests A through K, Jira regression, and UI parity).
 - **Documentation:** Complete and verified across `docs/ai/` and `SUMMARY.md`.
+

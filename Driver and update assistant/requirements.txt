@@ -1,0 +1,7 @@
+# Core runtime relies on Python standard library (>=3.10) for maximum reliability
+# and zero-footprint deployment on restricted corporate Windows laptops.
+#
+# Optional enhanced security & development dependencies:
+cryptography>=42.0.0; sys_platform == 'win32'
+pytest>=7.4.0
+pyinstaller>=6.3.0

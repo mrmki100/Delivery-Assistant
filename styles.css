@@ -7,6 +7,7 @@
     all: initial;
     font-family: 'Tahoma', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     direction: rtl;
+    color: var(--cx-text-primary);
 
     /* Surface & Background */
     --cx-bg-primary: #ffffff;
@@ -79,6 +80,7 @@
    THEME VARIABLES — Dark
    ============================================= */
 :host(.cx-dark) {
+    color: var(--cx-text-primary);
     --cx-bg-primary: #1e1e2e;
     --cx-bg-secondary: #252537;
     --cx-bg-tertiary: #2a2a3d;
@@ -263,6 +265,442 @@
     outline: 2px solid #6F2CF6;
     outline-offset: 2px;
 }
+
+/* --- Jira & Tracking Widgets --- */
+.cx-jira-widget,
+.cx-waybill-widget,
+.cx-phone-widget {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.cx-btn-trigger.loading {
+    cursor: wait !important;
+    opacity: 0.85;
+}
+
+.cx-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(0, 0, 0, 0.15);
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: cx-spin 0.8s linear infinite;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+.cx-spinner-blue {
+    border-color: rgba(29, 78, 216, 0.2);
+    border-top-color: #1d4ed8;
+}
+
+:host(.cx-dark) .cx-spinner-blue {
+    border-color: rgba(96, 165, 250, 0.2);
+    border-top-color: #60a5fa;
+}
+
+@keyframes cx-spin {
+    to { transform: rotate(360deg); }
+}
+
+.cx-btn-trigger.active-jira {
+    background: #eff6ff;
+    color: #1d4ed8;
+    border: 1px solid #bfdbfe;
+    cursor: pointer;
+}
+
+.cx-btn-trigger.active-jira:hover {
+    background: #dbeafe;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(29, 78, 216, 0.15);
+}
+
+:host(.cx-dark) .cx-btn-trigger.active-jira {
+    background: rgba(30, 64, 175, 0.25);
+    color: #60a5fa;
+    border: 1px solid rgba(96, 165, 250, 0.35);
+}
+
+:host(.cx-dark) .cx-btn-trigger.active-jira:hover {
+    background: rgba(30, 64, 175, 0.4);
+    box-shadow: 0 4px 12px rgba(30, 64, 175, 0.3);
+}
+
+/* Jira Single Ticket Button */
+.cx-btn-trigger.btn-jira-ticket {
+    background: #eff6ff;
+    color: #1e40af;
+    border: 1px solid #93c5fd;
+    cursor: pointer;
+    font-size: 11px;
+    padding: 0 10px;
+    max-width: 270px;
+}
+
+:host(.cx-dark) .cx-btn-trigger.btn-jira-ticket {
+    background: rgba(30, 64, 175, 0.3);
+    color: #93c5fd;
+    border: 1px solid rgba(147, 197, 253, 0.35);
+}
+
+.cx-btn-trigger.btn-jira-ticket:hover {
+    background: #dbeafe;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(29, 78, 216, 0.2);
+}
+
+:host(.cx-dark) .cx-btn-trigger.btn-jira-ticket:hover {
+    background: rgba(30, 64, 175, 0.5);
+}
+
+.cx-jira-key {
+    font-family: monospace;
+    font-weight: 800;
+    direction: ltr;
+    display: inline-block;
+    color: #0052cc;
+    letter-spacing: 0.5px;
+}
+
+:host(.cx-dark) .cx-jira-key {
+    color: #93c5fd;
+}
+
+.cx-jira-key.cx-jira-resolved {
+    text-decoration: line-through;
+    opacity: 0.75;
+}
+
+:host(.cx-dark) .cx-jira-key.cx-jira-resolved {
+    color: #a5b4fc;
+    opacity: 0.75;
+}
+
+.cx-jira-sep {
+    opacity: 0.6;
+    margin: 0 4px;
+    color: var(--cx-text-secondary);
+}
+
+:host(.cx-dark) .cx-jira-sep {
+    color: #93c5fd;
+    opacity: 0.6;
+}
+
+/* Status Badges */
+.cx-jira-status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.3;
+    white-space: nowrap;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+}
+
+.cx-jira-status-badge.status-done {
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+}
+
+:host(.cx-dark) .cx-jira-status-badge.status-done {
+    background: rgba(22, 101, 52, 0.35);
+    color: #86efac;
+    border: 1px solid rgba(134, 239, 172, 0.3);
+}
+
+.cx-jira-status-badge.status-inprogress {
+    background: #dbeafe;
+    color: #1e40af;
+    border: 1px solid #bfdbfe;
+}
+
+:host(.cx-dark) .cx-jira-status-badge.status-inprogress {
+    background: rgba(30, 64, 175, 0.35);
+    color: #93c5fd;
+    border: 1px solid rgba(147, 197, 253, 0.3);
+}
+
+.cx-jira-status-badge.status-new {
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid #e2e8f0;
+}
+
+:host(.cx-dark) .cx-jira-status-badge.status-new {
+    background: #2a2a3d;
+    color: #cbd5e1;
+    border: 1px solid #3a3a52;
+}
+
+.cx-jira-status-badge.status-rejected {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+
+:host(.cx-dark) .cx-jira-status-badge.status-rejected {
+    background: rgba(153, 27, 27, 0.35);
+    color: #fca5a5;
+    border: 1px solid rgba(252, 165, 165, 0.3);
+}
+
+.cx-jira-status-badge.status-unknown {
+    background: #f3f4f6;
+    color: #6b7280;
+    border: 1px solid #e5e7eb;
+}
+
+:host(.cx-dark) .cx-jira-status-badge.status-unknown {
+    background: #2a2a3d;
+    color: #9ca3af;
+    border: 1px solid #3a3a52;
+}
+
+/* Jira Multi-ticket Dropdown Button */
+.cx-btn-trigger.btn-jira-multi {
+    background: #eff6ff;
+    color: #1d4ed8;
+    border: 1px solid #93c5fd;
+    cursor: pointer;
+}
+
+.cx-btn-trigger.btn-jira-multi:hover {
+    background: #dbeafe;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(29, 78, 216, 0.2);
+}
+
+:host(.cx-dark) .cx-btn-trigger.btn-jira-multi {
+    background: rgba(30, 64, 175, 0.25);
+    color: #60a5fa;
+    border: 1px solid rgba(96, 165, 250, 0.35);
+}
+
+:host(.cx-dark) .cx-btn-trigger.btn-jira-multi:hover {
+    background: rgba(30, 64, 175, 0.4);
+}
+
+/* Jira Dropdown Floating Menu (floats above bar) */
+.cx-jira-menu {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    min-width: 300px;
+    max-width: 400px;
+    max-height: 280px;
+    overflow-y: auto;
+    background: var(--cx-bg-primary);
+    border: 1px solid var(--cx-border-heavy);
+    border-radius: 10px;
+    box-shadow: var(--cx-shadow-modal);
+    z-index: 1000000;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    animation: cx-dropdown-fade 0.15s ease-out;
+    box-sizing: border-box;
+    color: var(--cx-text-primary);
+}
+
+@keyframes cx-dropdown-fade {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.cx-jira-menu-header-bar {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--cx-text-secondary);
+    padding: 4px 8px 6px;
+    border-bottom: 1px solid var(--cx-border-light);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+:host(.cx-dark) .cx-jira-menu-header-bar {
+    color: #b0b0c8;
+    border-bottom-color: #2f2f45;
+}
+
+.cx-jira-menu-item {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    background: var(--cx-bg-secondary);
+    border: 1px solid var(--cx-border-light);
+    color: var(--cx-text-primary);
+    transition: all 0.15s ease;
+    text-align: right;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.cx-jira-menu-item:hover,
+.cx-jira-menu-item:focus {
+    background: #eff6ff;
+    border-color: #93c5fd;
+    transform: translateX(-2px);
+    outline: none;
+}
+
+.cx-jira-menu-item:hover .cx-jira-key,
+.cx-jira-menu-item:focus .cx-jira-key {
+    color: #1d4ed8;
+}
+
+:host(.cx-dark) .cx-jira-menu-item:hover,
+:host(.cx-dark) .cx-jira-menu-item:focus {
+    background: rgba(30, 64, 175, 0.35);
+    border-color: #60a5fa;
+    outline: 2px solid #3b82f6;
+    outline-offset: 1px;
+}
+
+:host(.cx-dark) .cx-jira-menu-item:hover .cx-jira-key,
+:host(.cx-dark) .cx-jira-menu-item:focus .cx-jira-key {
+    color: #bfdbfe;
+}
+
+.cx-jira-item-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.cx-jira-item-summary {
+    font-size: 11px;
+    color: var(--cx-text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    direction: auto;
+}
+
+:host(.cx-dark) .cx-jira-item-summary {
+    color: #b0b0c8;
+}
+
+.cx-jira-menu-item:hover .cx-jira-item-summary,
+.cx-jira-menu-item:focus .cx-jira-item-summary {
+    color: var(--cx-text-primary);
+}
+
+:host(.cx-dark) .cx-jira-menu-item:hover .cx-jira-item-summary,
+:host(.cx-dark) .cx-jira-menu-item:focus .cx-jira-item-summary {
+    color: #f1f5f9;
+}
+
+/* Empty State Badge */
+.cx-jira-empty-badge,
+.cx-empty-badge {
+    height: 34px;
+    padding: 0 10px;
+    background: var(--cx-bg-tertiary);
+    color: var(--cx-text-secondary);
+    border: 1px solid var(--cx-border-medium);
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+:host(.cx-dark) .cx-jira-empty-badge,
+:host(.cx-dark) .cx-empty-badge {
+    background: var(--cx-bg-tertiary);
+    color: var(--cx-text-secondary);
+    border-color: var(--cx-border-medium);
+}
+
+/* Error State Badge (Jira & Chapar Shared Error Pattern) */
+.cx-jira-error-badge,
+.cx-error-badge {
+    height: 34px;
+    padding: 0 10px;
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+:host(.cx-dark) .cx-jira-error-badge,
+:host(.cx-dark) .cx-error-badge {
+    background: rgba(153, 27, 27, 0.3);
+    color: #fca5a5;
+    border-color: rgba(252, 165, 165, 0.3);
+}
+
+.cx-jira-login-btn,
+.cx-badge-login-btn {
+    background: #0052cc;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 10px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s;
+}
+
+.cx-jira-login-btn:hover,
+.cx-badge-login-btn:hover {
+    background: #0747a6;
+}
+
+/* Small Refresh Button */
+.cx-jira-refresh-btn,
+.cx-badge-refresh-btn {
+    width: 22px;
+    height: 22px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: var(--cx-text-muted);
+    transition: all 0.15s;
+    padding: 0;
+}
+
+.cx-jira-refresh-btn:hover,
+.cx-badge-refresh-btn:hover {
+    color: var(--cx-text-primary);
+    background: var(--cx-bg-hover);
+    transform: rotate(45deg);
+}
+
 
 /* --- Secondary Utilities Area (Settings & Theme) --- */
 .cx-utilities-group {
@@ -1204,6 +1642,20 @@
     color: #f8fafc;
 }
 
+.cx-package-card-value.cx-empty-reference {
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    color: #64748b;
+    direction: rtl;
+    letter-spacing: normal;
+    font-style: italic;
+}
+
+:host(.cx-dark) .cx-package-card-value.cx-empty-reference {
+    color: #94a3b8;
+}
+
 .cx-package-card-copy {
     display: inline-flex;
     align-items: center;
@@ -1340,6 +1792,37 @@
     box-shadow: 0 2px 8px rgba(245, 158, 11, 0.35);
 }
 
+/* Disabled state for Tracking Action buttons */
+.cx-track-action-btn:disabled,
+.cx-track-action-btn[disabled],
+.cx-track-action-btn[aria-disabled="true"] {
+    opacity: 0.45;
+    cursor: not-allowed !important;
+    pointer-events: none;
+    transform: none !important;
+    box-shadow: none !important;
+    filter: grayscale(0.5);
+}
+
+:host(.cx-dark) .cx-track-action-btn:disabled,
+:host(.cx-dark) .cx-track-action-btn[disabled],
+:host(.cx-dark) .cx-track-action-btn[aria-disabled="true"] {
+    opacity: 0.35;
+    cursor: not-allowed !important;
+    pointer-events: none;
+    transform: none !important;
+    box-shadow: none !important;
+    filter: grayscale(0.6);
+}
+
+.cx-package-card-copy:disabled,
+.cx-package-card-copy[disabled],
+.cx-package-card-copy[aria-disabled="true"] {
+    opacity: 0.4;
+    cursor: not-allowed !important;
+    pointer-events: none;
+}
+
 /* Responsive adjustments for smaller screens */
 @media (max-width: 520px) {
     .cx-modal {
@@ -1357,7 +1840,3 @@
     }
 }
 
-/* --- Admin Orders: Hide Pending Payment --- */
-.cx-pending-payment-row {
-    display: none !important;
-}

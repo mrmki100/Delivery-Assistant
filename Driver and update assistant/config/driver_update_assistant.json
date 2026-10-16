@@ -1,0 +1,9 @@
+{
+    "path":  "C:\\Users\\mrmki\\Documents\\antiGG repo\\Delivery Assistant\\Driver and update assistant\\dist\\client\\DriverUpdateAssistant-Client\\DriverUpdateAssistant-Client.exe",
+    "description":  "Native Messaging Host for Delivery Assistant Extension",
+    "name":  "driver_update_assistant",
+    "allowed_origins":  [
+                            "chrome-extension://ajbnjogoeehfjnjbpodgoihmcmooliom/"
+                        ],
+    "type":  "stdio"
+}

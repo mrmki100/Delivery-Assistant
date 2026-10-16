@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "driver-update-assistant"
+version = "1.0.0"
+description = "Windows Updater and Restricted Network Folder-Access Management Tool for Delivery Assistant"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [
+    { name = "Delivery Assistant Systems Team" }
+]
+classifiers = [
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "cryptography>=42.0.0",
+    "pyinstaller>=6.3.0"
+]
+
+[project.scripts]
+driver-assistant = "driver_update_assistant.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

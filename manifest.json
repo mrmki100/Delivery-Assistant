@@ -8,7 +8,8 @@
     "activeTab",
     "tabs",
     "declarativeNetRequest",
-    "declarativeNetRequestWithHostAccess"
+    "declarativeNetRequestWithHostAccess",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "*://panel.automoby.ir/*",
@@ -16,7 +17,8 @@
     "*://portal.chaparnet.com/*",
     "*://*.chaparnet.com/*",
     "*://app.krch.ir/*",
-    "*://tracking.post.ir/*"
+    "*://tracking.post.ir/*",
+    "*://jira.automoby.ir/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -24,31 +26,54 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://panel.automoby.ir/*"],
-      "js": ["injected-main.js"],
+      "matches": [
+        "*://panel.automoby.ir/*"
+      ],
+      "js": [
+        "injected-main.js"
+      ],
       "world": "MAIN",
       "run_at": "document_start"
     },
     {
-      "matches": ["*://panel.automoby.ir/*"],
-      "js": ["ui-render.js", "shortcuts.js", "content.js"],
+      "matches": [
+        "*://panel.automoby.ir/*"
+      ],
+      "js": [
+        "ui-render.js",
+        "shortcuts.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["*://tracking.post.ir/*"],
-      "js": ["iran-post.js"],
+      "matches": [
+        "*://tracking.post.ir/*"
+      ],
+      "js": [
+        "iran-post.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["*://portal.chaparnet.com/*"],
-      "js": ["chapar-portal.js"],
+      "matches": [
+        "*://portal.chaparnet.com/*"
+      ],
+      "js": [
+        "chapar-portal.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["styles.css", "injected-main.js"],
-      "matches": ["*://panel.automoby.ir/*"]
+      "resources": [
+        "styles.css",
+        "injected-main.js"
+      ],
+      "matches": [
+        "*://panel.automoby.ir/*"
+      ]
     }
   ]
 }

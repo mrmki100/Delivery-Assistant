@@ -20,13 +20,28 @@ User clicks "📦 چاپار: [Waybill]" button
     ↓
 `handleChaparFetch()` starts execution
     ↓
+`checkChaparAuthStatus(forceRefresh)` performs decoupled pre-flight verification:
+- Checks active portal tabs (`PING_PORTAL_SESSION`)
+- Queries `https://portal.chaparnet.com/index.php?P=Operation&Tab=Consignment`
+- If unauthenticated / redirect / login HTML / `NEEDS_LOGIN`:
+  → Halts immediately with `{ success: false, error: 'AUTH_REQUIRED', message: 'شما باید در تب دیگری در سایت چاپار لاگین باشید' }`
+  → `content.js` calls `renderChaparErrorState(widget, ...)` to transform button into red `.cx-jira-error-badge` with `"⚠️ نیاز به ورود"`, `"ورود ↗"`, and `"🔄"`.
+  → Zero requests to `Consignment.php` made; NO public tracking modal shown.
+    ↓
+If `AUTHENTICATED`:
 **(ASYNC BRANCH 1)**: `fetch('https://app.krch.ir/v1/tracking')` for metadata
 **(ASYNC BRANCH 2)**: `fetch('.../Consignment.php')` to get Internal DB ID from Chapar Portal
     ↓
-Wait for Internal ID. If found, parallel query via `Promise.allSettled`:
-- `fetch('.../ConsignmentItems.php')` to extract package numbers.
-- `fetch('.../ConsignmentHistory.php')` to extract detailed timeline logs.
-- `fetchChaparConsignmentPopup(internalId)` via xajax (`DrawPopupForm`) to extract detailed popup metadata.
+Lookup response analyzed:
+- Inspects for session expiry during request (redirects or login HTML). If session expired mid-flight, marks `NEEDS_LOGIN` and returns `AUTH_REQUIRED`.
+- Evaluates rows returned: empty Flexigrid `{page:1,total:0,rows:[]}` does NOT prove auth on its own.
+- If pre-auth was verified `AUTHENTICATED` and genuine 0 rows are returned across all search queries:
+  → ONLY then returns `{ success: true, isPublicOnly: true, trackingNumber: waybill }` for public tracking.
+- If `AUTHENTICATED` and row found:
+  → Extracts Internal ID. Parallel queries via `Promise.allSettled`:
+    - `fetch('.../ConsignmentItems.php')` to extract package numbers.
+    - `fetch('.../ConsignmentHistory.php')` to extract detailed timeline logs.
+    - `fetchChaparConsignmentPopup(internalId)` via xajax (`DrawPopupForm`) to extract detailed popup metadata.
     ↓
 `parseChaparPopupHTML()` scans the server-rendered HTML:
 - Finds `<div id="PACKAGE_LIST">` and all `<div class="manifest_item">` elements.
@@ -68,13 +83,14 @@ User clicks "📱 موبایل: [Phone]" button
     ↓
 `fetch('.../Consignment.php')` sends a POST request with `credentials: 'include'` (sending user's active portal cookies).
     ↓
-Server returns sloppy JSON list of all waybills attached to that phone number.
-    ↓
-`parseSloppyJSON()` fixes and parses the JSON.
+`analyzeChaparPortalAuth(res, text)` evaluates session state:
+- If `NEEDS_LOGIN` → Returns `{ success: false, error: 'AUTH_REQUIRED' }` → `content.js` renders `.cx-jira-error-badge` with `"⚠️ نیاز به ورود"`.
+- If `PORTAL_UNAVAILABLE` → Returns `{ success: false, error: 'PORTAL_UNAVAILABLE' }`.
+- If `AUTHENTICATED` → `parseSloppyJSON()` fixes and parses the JSON.
     ↓
 `background.js` responds to message with `{ success: true, isPhoneList: true, data: parsedResults }`
     ↓
-`content.js` receives response
+`content.js` receives response (verifies `currentRoutingSeq`).
     ↓
 Calls `renderPhoneListModal(data)` in `ui-render.js`
     ↓

@@ -143,6 +143,8 @@
         let orderId = '';
         let parcelId = '';
 
+        const isParcelPath = window.location.pathname.startsWith('/parcel');
+
         // 1. Phone matching
         for (const key of PHONE_KEYS) {
             if (rowObj[key] != null) {
@@ -151,6 +153,17 @@
                     phone = val;
                     break;
                 }
+            }
+        }
+        if (!phone) {
+            const nestedPhone = rowObj.userPhoneNumber
+                || rowObj.order?.addressClone?.receiverPhoneNumber
+                || rowObj.addressClone?.receiverPhoneNumber
+                || rowObj.physicalItem?.physicalOrderItem?.orderItem?.order?.user?.phoneNumber
+                || rowObj.order?.user?.phoneNumber
+                || rowObj.user?.phoneNumber;
+            if (nestedPhone != null && String(nestedPhone).trim().length >= 7) {
+                phone = String(nestedPhone).trim();
             }
         }
         // Phone regex fallback
@@ -167,12 +180,34 @@
         }
 
         // 2. Waybill matching
+        function isValidWaybillCandidate(val) {
+            if (!val || typeof val !== 'string') return false;
+            const str = val.trim();
+            if (str.length < 3) return false;
+            if (/[\u0600-\u06FF]/.test(str)) return false;
+            if (/^(null|undefined|none|n\/a|na|-+)$/i.test(str)) return false;
+            if (/^([0-9])\1{5,}$/.test(str)) return false;
+            return true;
+        }
+
         for (const key of WAYBILL_KEYS) {
             if (rowObj[key] != null) {
                 const val = String(rowObj[key]).trim();
-                if (val && val.length >= 3) {
+                if (isValidWaybillCandidate(val)) {
                     waybill = val;
                     break;
+                }
+            }
+        }
+        if (!waybill) {
+            const nestedWaybill = rowObj.shipping?.billOfLading
+                || rowObj.return?.billOfLading
+                || rowObj.parcel?.billOfLading
+                || rowObj.shipping?.snappBoxOrder?.trackingNumber;
+            if (nestedWaybill != null) {
+                const str = String(nestedWaybill).trim();
+                if (isValidWaybillCandidate(str)) {
+                    waybill = str;
                 }
             }
         }
@@ -203,6 +238,23 @@
                 }
             }
         }
+        if (!name) {
+            if (rowObj.userFullName && String(rowObj.userFullName).trim().length > 1) {
+                name = String(rowObj.userFullName).trim();
+            } else {
+                const addr = rowObj.order?.addressClone || rowObj.addressClone;
+                if (addr && (addr.receiverFirstName || addr.receiverFamilyName)) {
+                    name = `${addr.receiverFirstName || ''} ${addr.receiverFamilyName || ''}`.trim();
+                } else {
+                    const u = rowObj.physicalItem?.physicalOrderItem?.orderItem?.order?.user
+                        || rowObj.order?.user
+                        || rowObj.user;
+                    if (u) {
+                        name = `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.fullName || '';
+                    }
+                }
+            }
+        }
 
         // 4. Order ID matching
         for (const key of ORDER_KEYS) {
@@ -214,18 +266,43 @@
                 }
             }
         }
-        if (!orderId && rowObj.order && rowObj.order.id) {
-            orderId = String(rowObj.order.id).trim();
+        if (!orderId) {
+            const nestedOrder = rowObj.order?.id
+                || rowObj.physicalItem?.physicalOrderItem?.orderItem?.orderId
+                || rowObj.physicalItem?.physicalOrderItem?.orderItem?.order?.id;
+            if (nestedOrder != null && /^\d+$/.test(String(nestedOrder).trim())) {
+                orderId = String(nestedOrder).trim();
+            }
         }
 
-        // 5. Parcel ID matching
-        for (const key of PARCEL_KEYS) {
+        // 5. Parcel ID matching (Shipment identifier)
+        // High priority: explicit parcel fields
+        const explicitParcelKeys = ['parcelId', 'parcel_id', 'packageNo', 'consignmentId', 'shipmentId'];
+        for (const key of explicitParcelKeys) {
             if (rowObj[key] != null) {
                 const val = String(rowObj[key]).trim();
                 if (val && /^\d+$/.test(val)) {
                     parcelId = val;
                     break;
                 }
+            }
+        }
+        // Nested parcel structures (e.g. ReturnItemModel in Returns)
+        if (!parcelId) {
+            const nestedParcel = rowObj.physicalItem?.physicalOrderItem?.parcelId
+                || rowObj.physicalOrderItem?.parcelId
+                || rowObj.parcel?.id
+                || rowObj.parcel?.parcelId
+                || rowObj.parcelItem?.parcelId;
+            if (nestedParcel != null && /^\d+$/.test(String(nestedParcel).trim())) {
+                parcelId = String(nestedParcel).trim();
+            }
+        }
+        // Admin Orders (/parcel/) or explicit ParcelModel where rowObj.id IS the parcel identifier:
+        // NEVER treat generic rowObj.id as parcelId in Returns, Manual Refunds, or non-parcel models!
+        if (!parcelId && (isParcelPath || rowObj.__typename === 'ParcelModel')) {
+            if (rowObj.id != null && /^\d+$/.test(String(rowObj.id).trim())) {
+                parcelId = String(rowObj.id).trim();
             }
         }
 
@@ -319,24 +396,121 @@
         return false;
     }
 
-    // Listen for custom apply event from content script or settings
+    // ==========================================
+    // 7. PENDING PAYMENT FILTER AUTOMATION (MUI DataGrid Model Layer)
+    // ==========================================
+    function getGridFiber() {
+        const gridRoot = document.querySelector('.MuiDataGrid-root');
+        if (!gridRoot) return null;
+        let fiber = getFiber(gridRoot);
+        let cur = fiber;
+        while (cur) {
+            if (cur.memoizedProps?.apiRef?.current && Array.isArray(cur.memoizedProps?.rows)) {
+                return {
+                    apiRef: cur.memoizedProps.apiRef,
+                    rawRows: cur.memoizedProps.rows,
+                    fiberNode: cur
+                };
+            }
+            cur = cur.return;
+        }
+        return null;
+    }
+
+    function isPendingPaymentOrder(row) {
+        if (!row || typeof row !== 'object') return false;
+        // Authoritative GraphQL enum or status field
+        if (row.state === 'PAYMENT_PENDING' || row.state === 'در انتظار پرداخت') return true;
+        if (row.status === 'PAYMENT_PENDING' || row.status === 'در انتظار پرداخت') return true;
+        if (row.orderState === 'PAYMENT_PENDING' || row.orderState === 'در انتظار پرداخت') return true;
+        if (row.order?.state === 'PAYMENT_PENDING' || row.order?.state === 'در انتظار پرداخت') return true;
+        return false;
+    }
+
+    let isSyncingPending = false;
+    function syncPendingOrdersFilter() {
+        if (isSyncingPending) return;
+        const grid = getGridFiber();
+        if (!grid || !grid.apiRef?.current || typeof grid.apiRef.current.setRows !== 'function') return;
+
+        const isHidePending = document.documentElement.getAttribute('data-cx-hide-pending') === 'true';
+        const rawRows = grid.rawRows;
+        if (!rawRows || !Array.isArray(rawRows)) return;
+
+        const targetRows = isHidePending
+            ? rawRows.filter(r => !isPendingPaymentOrder(r))
+            : rawRows;
+
+        const currentGridIds = grid.apiRef.current.state?.rows?.dataRowIds || [];
+        const targetIds = targetRows.map(r => r.id);
+
+        let isMatch = currentGridIds.length === targetIds.length;
+        if (isMatch) {
+            for (let i = 0; i < targetIds.length; i++) {
+                if (currentGridIds[i] !== targetIds[i]) {
+                    isMatch = false;
+                    break;
+                }
+            }
+        }
+
+        if (isMatch) return;
+
+        try {
+            isSyncingPending = true;
+            grid.apiRef.current.setRows(targetRows);
+        } catch (err) {
+            // Fail silently to avoid interfering with host page
+        } finally {
+            isSyncingPending = false;
+        }
+    }
+
+    // Listen for custom apply events from content script or settings
     window.addEventListener('cx-apply-page-size-100', () => {
         applyPageSize100();
     });
-
-    // Observe DOM mutations for newly rendered MuiTablePagination elements
-    let paginationDebounce = null;
-    const paginationObserver = new MutationObserver(() => {
-        if (document.documentElement.getAttribute('data-cx-always-100') !== 'true') return;
-        if (paginationDebounce) return;
-        paginationDebounce = setTimeout(() => {
-            paginationDebounce = null;
-            applyPageSize100();
-        }, 150);
+    window.addEventListener('cx-apply-pending-filter', () => {
+        syncPendingOrdersFilter();
     });
+
+    // Observe documentElement attribute changes for real-time reactivity
+    const attrObserver = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+            if (m.type === 'attributes') {
+                if (m.attributeName === 'data-cx-always-100' && document.documentElement.getAttribute('data-cx-always-100') === 'true') {
+                    applyPageSize100();
+                } else if (m.attributeName === 'data-cx-hide-pending') {
+                    syncPendingOrdersFilter();
+                }
+            }
+        }
+    });
+    attrObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-cx-always-100', 'data-cx-hide-pending'] });
+
+    // Observe DOM mutations for newly rendered pagination and DataGrid rows
+    let paginationDebounce = null;
+    let gridDebounce = null;
+    const domObserver = new MutationObserver(() => {
+        if (document.documentElement.getAttribute('data-cx-always-100') === 'true') {
+            if (!paginationDebounce) {
+                paginationDebounce = setTimeout(() => {
+                    paginationDebounce = null;
+                    applyPageSize100();
+                }, 150);
+            }
+        }
+        if (!gridDebounce) {
+            gridDebounce = setTimeout(() => {
+                gridDebounce = null;
+                syncPendingOrdersFilter();
+            }, 120);
+        }
+    });
+
     const targetRoot = document.body || document.documentElement;
     if (targetRoot) {
-        paginationObserver.observe(targetRoot, { childList: true, subtree: true });
+        domObserver.observe(targetRoot, { childList: true, subtree: true });
     }
 
     // React router SPA navigation hooks
@@ -345,6 +519,7 @@
         history.pushState = function() {
             const ret = originalPushState.apply(this, arguments);
             setTimeout(applyPageSize100, 250);
+            setTimeout(syncPendingOrdersFilter, 300);
             return ret;
         };
     }
@@ -353,14 +528,17 @@
         history.replaceState = function() {
             const ret = originalReplaceState.apply(this, arguments);
             setTimeout(applyPageSize100, 250);
+            setTimeout(syncPendingOrdersFilter, 300);
             return ret;
         };
     }
     window.addEventListener('popstate', () => {
         setTimeout(applyPageSize100, 250);
+        setTimeout(syncPendingOrdersFilter, 300);
     });
 
-    // Initial load check
+    // Initial load checks
     setTimeout(applyPageSize100, 500);
+    setTimeout(syncPendingOrdersFilter, 600);
 
 })();
