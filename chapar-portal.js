@@ -7,86 +7,6 @@
 (function() {
     'use strict';
 
-    // Check if there is a pending task from the extension
-    chrome.storage.local.get(['chaparTrackingTask', 'chaparTrackingWaybill'], (data) => {
-        const internalId = data.chaparTrackingTask;
-        const waybill = data.chaparTrackingWaybill;
-        
-        if (internalId || waybill) {
-            // We found a task, clear it
-            chrome.storage.local.remove(['chaparTrackingTask', 'chaparTrackingWaybill']);
-            
-            if (internalId && /^\d+$/.test(String(internalId).trim())) {
-                const safeInternalId = String(internalId).trim();
-                // If we have the exact internal ID, we can directly trigger the waybill popup!
-                // We inject a script tag that polls for the xajax_DoPHP function
-                // since the portal is an SPA and might take time to initialize its xajax scripts.
-                const script = document.createElement('script');
-                script.textContent = `
-                    (function() {
-                        let attempts = 0;
-                        const maxAttempts = 20; // 10 seconds
-                        const checkExist = setInterval(function() {
-                            attempts++;
-                            if (typeof xajax_DoPHP === 'function') {
-                                clearInterval(checkExist);
-                                console.log('Delivery Assistant: Requesting popup for waybill ' + ${JSON.stringify(internalId)});
-                                
-                                // We must call the exact xajax function that draws the popup form and then triggers OpenConsHistory
-                                // This matches the exact payload the portal sends when clicking a waybill.
-                                xajax_DoPHP(
-                                    'DrawPopupForm', 
-                                    {
-                                        "FormName": "FormConsignmentHistory",
-                                        "variables": { "no": ${JSON.stringify(internalId)} },
-                                        "functions": "undefined,RunFunction",
-                                        "Width": 1500,
-                                        "Height": 110,
-                                        "Border": 1,
-                                        "Padding": 0,
-                                        "BoxTPL": "PopupBox.tpl"
-                                    }, 
-                                    'FormConsignmentHistory', 
-                                    "displayPopupDiv('FormConsignmentHistory',1500,110,-1,50);MakeDraggable('#FormConsignmentHistory');", 
-                                    "1;", 
-                                    "centerPopupDiv('FormConsignmentHistory');AutoFocus(\\"FormConsignmentHistory\\");OpenConsHistory(" + ${JSON.stringify(internalId)} + ");;"
-                                );
-                            } else if (attempts >= maxAttempts) {
-                                clearInterval(checkExist);
-                                console.warn('Delivery Assistant: xajax_DoPHP function not found on page after 10 seconds.');
-                            }
-                        }, 500);
-                    })();
-                `;
-                (document.head || document.documentElement).appendChild(script);
-                script.remove();
-            } else if (waybill) {
-                // Fallback: We only have the waybill number. 
-                // Attempt to inject it into the Flexigrid search box.
-                let attempts = 0;
-                const checkSearchBox = setInterval(() => {
-                    attempts++;
-                    // Common Flexigrid search box class is .qsbox
-                    const qsbox = document.querySelector('.qsbox') || document.querySelector('input[name="query"]');
-                    if (qsbox) {
-                        clearInterval(checkSearchBox);
-                        qsbox.value = waybill;
-                        qsbox.dispatchEvent(new Event('input', { bubbles: true }));
-                        
-                        // Try to find the search button and click it
-                        const searchBtn = qsbox.parentElement?.querySelector('input[type="button"], button') || document.querySelector('.qSearch');
-                        if (searchBtn) {
-                            searchBtn.click();
-                        }
-                    } else if (attempts >= 20) {
-                        clearInterval(checkSearchBox);
-                        console.warn("Delivery Assistant: Could not find search box for fallback.");
-                    }
-                }, 500);
-            }
-        }
-    });
-
     // ==========================================
     // PORTAL AUTHENTICATION DETECTION & NOTIFIER
     // ==========================================
@@ -133,10 +53,119 @@
         };
     }
 
+    // ==========================================
+    // PENDING TRACKING TASK EXECUTOR
+    // ==========================================
+    let isTaskExecuting = false;
+
+    function checkAndRunChaparTask() {
+        if (!chrome?.storage?.local) return;
+
+        chrome.storage.local.get(['chaparTrackingTask', 'chaparTrackingWaybill'], (data) => {
+            const internalId = data?.chaparTrackingTask;
+            const waybill = data?.chaparTrackingWaybill;
+            
+            if (!internalId && !waybill) {
+                return;
+            }
+
+            const auth = evaluatePortalAuthState();
+            // If operator is on the login page, preserve the task in storage until login completes
+            if (auth.isLoginPage) {
+                return;
+            }
+
+            if (isTaskExecuting) return;
+            isTaskExecuting = true;
+
+            // Only remove stored task once page is confirmed not a login page and task execution has started
+            chrome.storage.local.remove(['chaparTrackingTask', 'chaparTrackingWaybill'], () => {
+                if (internalId && /^\d+$/.test(String(internalId).trim())) {
+                    const safeInternalId = String(internalId).trim();
+                    // Inject script to trigger xajax DoPHP popup for this internal consignment ID
+                    const script = document.createElement('script');
+                    script.textContent = `
+                        (function() {
+                            let attempts = 0;
+                            const maxAttempts = 20; // 10 seconds
+                            const checkExist = setInterval(function() {
+                                attempts++;
+                                if (typeof xajax_DoPHP === 'function') {
+                                    clearInterval(checkExist);
+                                    console.log('Delivery Assistant: Requesting popup for waybill ' + ${JSON.stringify(safeInternalId)});
+                                    
+                                    xajax_DoPHP(
+                                        'DrawPopupForm', 
+                                        {
+                                            "FormName": "FormConsignmentHistory",
+                                            "variables": { "no": ${JSON.stringify(safeInternalId)} },
+                                            "functions": "undefined,RunFunction",
+                                            "Width": 1500,
+                                            "Height": 110,
+                                            "Border": 1,
+                                            "Padding": 0,
+                                            "BoxTPL": "PopupBox.tpl"
+                                        }, 
+                                        'FormConsignmentHistory', 
+                                        "displayPopupDiv('FormConsignmentHistory',1500,110,-1,50);MakeDraggable('#FormConsignmentHistory');", 
+                                        "1;", 
+                                        "centerPopupDiv('FormConsignmentHistory');AutoFocus(\\"FormConsignmentHistory\\");OpenConsHistory(" + ${JSON.stringify(safeInternalId)} + ");;"
+                                    );
+                                } else if (attempts >= maxAttempts) {
+                                    clearInterval(checkExist);
+                                    console.warn('Delivery Assistant: xajax_DoPHP function not found on page after 10 seconds.');
+                                }
+                            }, 500);
+                        })();
+                    `;
+                    (document.head || document.documentElement).appendChild(script);
+                    script.remove();
+                    setTimeout(() => { isTaskExecuting = false; }, 3000);
+                } else if (waybill) {
+                    // Fallback: We only have the waybill number. Inject into Flexigrid search box.
+                    let attempts = 0;
+                    const checkSearchBox = setInterval(() => {
+                        attempts++;
+                        const qsbox = document.querySelector('.qsbox') || document.querySelector('input[name="query"]');
+                        if (qsbox) {
+                            clearInterval(checkSearchBox);
+                            qsbox.value = waybill;
+                            qsbox.dispatchEvent(new Event('input', { bubbles: true }));
+                            
+                            const searchBtn = qsbox.parentElement?.querySelector('input[type="button"], button') || document.querySelector('.qSearch');
+                            if (searchBtn) {
+                                searchBtn.click();
+                            }
+                            isTaskExecuting = false;
+                        } else if (attempts >= 20) {
+                            clearInterval(checkSearchBox);
+                            console.warn("Delivery Assistant: Could not find search box for fallback.");
+                            isTaskExecuting = false;
+                        }
+                    }, 500);
+                } else {
+                    isTaskExecuting = false;
+                }
+            });
+        });
+    }
+
+    // Process tasks whenever a new task is written to storage
+    if (chrome?.storage?.onChanged) {
+        chrome.storage.onChanged.addListener((changes, area) => {
+            if (area === 'local' && (changes.chaparTrackingTask?.newValue || changes.chaparTrackingWaybill?.newValue)) {
+                checkAndRunChaparTask();
+            }
+        });
+    }
+
     let lastSentAuthState = null;
 
     function notifyAuthIfChanged() {
         const status = evaluatePortalAuthState();
+        if (status.isAuthenticated) {
+            checkAndRunChaparTask();
+        }
         if (lastSentAuthState === null || lastSentAuthState !== status.isAuthenticated) {
             lastSentAuthState = status.isAuthenticated;
             chrome.runtime.sendMessage({
@@ -149,6 +178,7 @@
 
     // 1. Initial check on load
     notifyAuthIfChanged();
+    checkAndRunChaparTask();
 
     // 2. Event-driven observer for SPA / DOM transitions without page reload
     let authDebounceTimer = null;
@@ -167,6 +197,7 @@
                 authObserver.observe(document.body, { childList: true, subtree: true });
             }
             notifyAuthIfChanged();
+            checkAndRunChaparTask();
         });
     }
 
@@ -175,6 +206,7 @@
         if (msg.action === 'PING_PORTAL_SESSION') {
             const status = evaluatePortalAuthState();
             sendResponse(status);
+            checkAndRunChaparTask();
             return true;
         }
     });

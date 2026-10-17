@@ -71,8 +71,13 @@
                             }
                         })
                     }, 8000);
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
                     const json = await res.json();
-                    const total = json?.data?.getReturnListGeneralTable?.total || 0;
+                    if ((Array.isArray(json?.errors) && json.errors.length > 0) || !json?.data?.getReturnListGeneralTable) {
+                        const errMsg = json?.errors?.[0]?.message || 'خطا در دریافت اطلاعات مرجوعی';
+                        throw new Error(errMsg);
+                    }
+                    const total = json.data.getReturnListGeneralTable.total || 0;
                     if (total > 0) {
                         return {
                             state: 'active',
@@ -136,9 +141,14 @@
                             }
                         })
                     }, 8000);
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
                     const json = await res.json();
-                    const total = json?.data?.adminManualRefunds?.total || 0;
-                    const items = json?.data?.adminManualRefunds?.items || [];
+                    if ((Array.isArray(json?.errors) && json.errors.length > 0) || !json?.data?.adminManualRefunds) {
+                        const errMsg = json?.errors?.[0]?.message || 'خطا در دریافت اطلاعات استرداد وجه';
+                        throw new Error(errMsg);
+                    }
+                    const total = json.data.adminManualRefunds.total || 0;
+                    const items = json.data.adminManualRefunds.items || [];
                     if (total > 0) {
                         const pending = items.find(i => i.state === 'PENDING_REFUND');
                         return {
@@ -165,8 +175,8 @@
             },
             fillSearch: (context) => {
                 const label = Array.from(document.querySelectorAll('label')).find(l => l.innerText?.trim() === 'شماره سفارش');
-                const input = label ? document.getElementById(label.getAttribute('for')) 
-                           : (document.getElementById(':rmt:') || document.querySelector('input[type="text"]:not([placeholder*="فروشنده"])'));
+                const input = label ? (document.getElementById(label.getAttribute('for')) || label.closest('.MuiFormControl-root, .MuiTextField-root, div')?.querySelector('input')) 
+                           : (document.querySelector('input[placeholder*="شماره سفارش"]') || document.querySelector('input[type="text"]:not([placeholder*="فروشنده"])'));
                 if (!input || !context.orderId) return false;
                 safeFillInput(input, context.orderId);
                 return true;
@@ -183,8 +193,8 @@
             checkStatus: null, // Always viewable directly
             fillSearch: (context) => {
                 const label = Array.from(document.querySelectorAll('label')).find(l => l.innerText?.trim() === 'جست و جو ...');
-                const input = label ? document.getElementById(label.getAttribute('for')) 
-                           : (document.getElementById(':rq1:') || document.querySelector('input[placeholder*="جست و جو"]'));
+                const input = label ? (document.getElementById(label.getAttribute('for')) || label.closest('.MuiFormControl-root, .MuiTextField-root, div')?.querySelector('input')) 
+                           : document.querySelector('input[placeholder*="جست و جو"]');
                 const val = context.orderId || context.phone || context.waybill;
                 if (!input || !val) return false;
                 safeFillInput(input, val);
@@ -310,7 +320,8 @@
 
     function navigateInPanel(targetRoute) {
         const cleanTarget = targetRoute.replace(/\/\*$/, '').replace(/\/$/, '');
-        if (window.location.pathname.startsWith(cleanTarget)) {
+        const isComments = targetRoute.includes('commnet') || targetRoute.includes('comment');
+        if (window.location.pathname.startsWith(cleanTarget) || (isComments && (window.location.pathname.startsWith('/commnets') || window.location.pathname.startsWith('/comments')))) {
             return true;
         }
 
@@ -321,7 +332,8 @@
             while (fiber) {
                 if (fiber.memoizedProps?.item?.path) {
                     const itemPath = fiber.memoizedProps.item.path.replace(/\/\*$/, '').replace(/\/$/, '');
-                    if (itemPath === cleanTarget || itemPath.startsWith(cleanTarget)) {
+                    if (itemPath === cleanTarget || itemPath.startsWith(cleanTarget) ||
+                        (isComments && (itemPath === '/commnets' || itemPath === '/comments' || itemPath.startsWith('/commnets') || itemPath.startsWith('/comments')))) {
                         const li = btn.querySelector('li') || btn;
                         li.click();
                         return true;
@@ -338,11 +350,16 @@
             '/parcel/': 'سفارشات ادمین',
             '/item-cancellation-requests/': 'درخواست‌های لغو کالا',
             '/commnets/': 'دیدگاه ها',
+            '/comments/': 'دیدگاه ها',
             '/product/': 'محصول'
         };
-        const title = routeTitles[targetRoute];
+        const title = routeTitles[targetRoute] || (isComments ? 'دیدگاه ها' : null);
         if (title) {
-            const btn = buttons.find(b => b.innerText?.trim() === title || b.getAttribute('aria-label') === title);
+            const btn = buttons.find(b => {
+                const text = b.innerText?.trim();
+                const aria = b.getAttribute('aria-label');
+                return text === title || aria === title || (isComments && (text?.includes('دیدگاه') || aria?.includes('دیدگاه')));
+            });
             if (btn) {
                 const li = btn.querySelector('li') || btn;
                 li.click();
@@ -361,7 +378,8 @@
         if (!shortcut) return;
 
         const cleanTarget = shortcut.route.replace(/\/\*$/, '').replace(/\/$/, '');
-        const isCurrentPage = window.location.pathname.startsWith(cleanTarget);
+        const isComments = shortcut.id === 'comments' || cleanTarget.includes('comment') || cleanTarget.includes('commnet');
+        const isCurrentPage = window.location.pathname.startsWith(cleanTarget) || (isComments && (window.location.pathname.startsWith('/commnets') || window.location.pathname.startsWith('/comments')));
 
         if (isCurrentPage) {
             // Already on target page, execute search fill directly
@@ -403,7 +421,8 @@
             if (!shortcut) return;
 
             const cleanTarget = shortcut.route.replace(/\/\*$/, '').replace(/\/$/, '');
-            if (window.location.pathname.startsWith(cleanTarget)) {
+            const isComments = shortcut.id === 'comments' || cleanTarget.includes('comment') || cleanTarget.includes('commnet');
+            if (window.location.pathname.startsWith(cleanTarget) || (isComments && (window.location.pathname.startsWith('/commnets') || window.location.pathname.startsWith('/comments')))) {
                 if (shortcut.fillSearch) {
                     const filled = shortcut.fillSearch(pending);
                     if (filled) {
@@ -544,7 +563,9 @@
                 if (thisSeq !== currentContext.seq) {
                     return; // Stale! Discard immediately
                 }
-                setCachedStatus(cacheKey, result);
+                if (result && result.state !== 'error') {
+                    setCachedStatus(cacheKey, result);
+                }
                 emitStatusUpdate(shortcut.id, result);
             }).catch(err => {
                 if (thisSeq === currentContext.seq) {

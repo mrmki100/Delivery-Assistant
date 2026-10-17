@@ -11,6 +11,9 @@
 
     if (window.__DELIVERY_ASSISTANT_MAIN_INJECTED__) return;
     window.__DELIVERY_ASSISTANT_MAIN_INJECTED__ = true;
+    try {
+        document.documentElement.setAttribute('data-cx-main-injected', 'true');
+    } catch (e) {}
 
     const PHONE_KEYS = [
         'phonenumber', 'mobile', 'customerMobile', 'phoneNumber', 'phone',
@@ -427,19 +430,141 @@
         return false;
     }
 
+    function toAsciiDigits(str) {
+        if (str == null) return '';
+        return String(str)
+            .replace(/[\u06F0-\u06F9]/g, d => String.fromCharCode(d.charCodeAt(0) - 0x06F0 + 48))
+            .replace(/[\u0660-\u0669]/g, d => String.fromCharCode(d.charCodeAt(0) - 0x0660 + 48));
+    }
+
+    function normalizePhoneNumber(raw) {
+        if (raw == null) return '';
+        let str = toAsciiDigits(String(raw)).trim().replace(/[\s\-\+\(\)\.]/g, '');
+        if (!/^\d+$/.test(str)) return '';
+        if (str.startsWith('00989') && str.length === 14) str = '0' + str.slice(4);
+        else if (str.startsWith('989') && str.length === 12) str = '0' + str.slice(2);
+        else if (str.startsWith('9') && str.length === 10) str = '0' + str;
+        if (/^09\d{9}$/.test(str)) return str;
+        if (/^0\d{10}$/.test(str)) return str;
+        return '';
+    }
+
+    function getActiveSearchReference() {
+        try {
+            const urlParams = new URLSearchParams(window.location.search);
+            const qParam = urlParams.get('q') || urlParams.get('search') || urlParams.get('query') || urlParams.get('phone') || urlParams.get('orderId');
+            if (qParam && qParam.trim()) {
+                return toAsciiDigits(qParam.trim());
+            }
+        } catch (_) {}
+
+        // Locate text input that is NOT a combobox (seller dropdown has role="combobox")
+        const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"]'));
+        for (const input of inputs) {
+            if (input.readOnly || input.disabled) continue;
+            if (input.getAttribute('role') === 'combobox') continue;
+            if (input.getAttribute('aria-autocomplete') === 'list') continue;
+
+            const placeholder = input.getAttribute('placeholder') || '';
+            const ariaLabel = input.getAttribute('aria-label') || '';
+            const container = input.closest('.MuiFormControl-root, .MuiTextField-root, .MuiOutlinedInput-root') || input.parentElement;
+            const containerText = container ? container.textContent : '';
+
+            if (/جست\s*و?\s*جو|search|شماره|تلفن|سفارش|کد/i.test(placeholder) ||
+                /جست\s*و?\s*جو|search|شماره|تلفن|سفارش|کد/i.test(ariaLabel) ||
+                /جست\s*و?\s*جو|search/i.test(containerText)) {
+                if (input.value && input.value.trim()) {
+                    return toAsciiDigits(input.value.trim());
+                }
+                return ''; // Search input exists and is empty
+            }
+        }
+
+        // Secondary fallback: any non-combobox text input with a value
+        for (const input of inputs) {
+            if (input.readOnly || input.disabled) continue;
+            if (input.getAttribute('role') === 'combobox') continue;
+            if (input.getAttribute('aria-autocomplete') === 'list') continue;
+            if (input.value && input.value.trim()) {
+                return toAsciiDigits(input.value.trim());
+            }
+        }
+
+        return '';
+    }
+
+    function getRowReferences(row) {
+        const phone = row.userPhoneNumber
+            || row.phone
+            || row.order?.addressClone?.receiverPhoneNumber
+            || row.order?.user?.phoneNumber
+            || row.user?.phoneNumber
+            || '';
+        const normPhone = normalizePhoneNumber(phone);
+        const orderId = toAsciiDigits(String(row.orderId || row.order?.id || row.order_id || '')).trim();
+        const parcelId = toAsciiDigits(String(row.parcelId || row.id || '')).trim();
+        const userId = toAsciiDigits(String(row.userId || row.user?.id || row.order?.user?.id || '')).trim();
+
+        return { normPhone, orderId, parcelId, userId };
+    }
+
+    function filterPendingOrdersWithPreservation(rawRows, isHidePending, activeSearchRef = '') {
+        if (!rawRows || !Array.isArray(rawRows)) return [];
+        if (!isHidePending) return rawRows;
+
+        const cleanRaw = toAsciiDigits(String(activeSearchRef || '')).trim();
+        const searchPhone = normalizePhoneNumber(cleanRaw);
+        const searchOrderId = cleanRaw;
+
+        const nonPendingOrders = [];
+        const pendingOrders = [];
+
+        for (const row of rawRows) {
+            if (isPendingPaymentOrder(row)) {
+                pendingOrders.push(row);
+            } else {
+                nonPendingOrders.push(row);
+            }
+        }
+
+        let preservedPending = null;
+
+        // Authoritative business contract:
+        // EXACT VALID MATCH EXISTS -> Preserve exactly ONE eligible matching pending-payment record.
+        // NO VALID EXACT MATCH (empty, invalid, or no match) -> Preserve ZERO pending-payment records.
+        // Non-pending records are ALWAYS preserved.
+        if (searchPhone || (searchOrderId && /^\d+$/.test(searchOrderId))) {
+            for (const row of pendingOrders) {
+                const refs = getRowReferences(row);
+                const isExactPhone = searchPhone && refs.normPhone === searchPhone;
+                const isExactOrder = searchOrderId && (refs.orderId === searchOrderId || refs.parcelId === searchOrderId || refs.userId === searchOrderId);
+                if (isExactPhone || isExactOrder) {
+                    preservedPending = row;
+                    break; // Deterministic: preserve exactly ONE eligible record
+                }
+            }
+        }
+
+        if (preservedPending) {
+            return rawRows.filter(r => !isPendingPaymentOrder(r) || r.id === preservedPending.id);
+        } else {
+            return nonPendingOrders;
+        }
+    }
+
     let isSyncingPending = false;
     function syncPendingOrdersFilter() {
         if (isSyncingPending) return;
         const grid = getGridFiber();
         if (!grid || !grid.apiRef?.current || typeof grid.apiRef.current.setRows !== 'function') return;
 
-        const isHidePending = document.documentElement.getAttribute('data-cx-hide-pending') === 'true';
+        const isParcelPage = window.location.pathname.startsWith('/parcel');
+        const isHidePending = isParcelPage && document.documentElement.getAttribute('data-cx-hide-pending') === 'true';
         const rawRows = grid.rawRows;
         if (!rawRows || !Array.isArray(rawRows)) return;
 
-        const targetRows = isHidePending
-            ? rawRows.filter(r => !isPendingPaymentOrder(r))
-            : rawRows;
+        const activeSearchRef = isHidePending ? getActiveSearchReference() : '';
+        const targetRows = filterPendingOrdersWithPreservation(rawRows, isHidePending, activeSearchRef);
 
         const currentGridIds = grid.apiRef.current.state?.rows?.dataRowIds || [];
         const targetIds = targetRows.map(r => r.id);
@@ -465,6 +590,15 @@
             isSyncingPending = false;
         }
     }
+
+    // Recompute filter on search input changes
+    const onSearchChange = (e) => {
+        if (e.target && (e.target.matches('input[type="text"], input[type="search"]') || e.target.closest('.MuiOutlinedInput-root'))) {
+            syncPendingOrdersFilter();
+        }
+    };
+    document.addEventListener('input', onSearchChange, true);
+    document.addEventListener('change', onSearchChange, true);
 
     // Listen for custom apply events from content script or settings
     window.addEventListener('cx-apply-page-size-100', () => {

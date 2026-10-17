@@ -30,11 +30,35 @@
             .replace(/[\u0660-\u0669]/g, d => String.fromCharCode(d.charCodeAt(0) - 0x0660 + 48));
     }
 
+    function normalizePhoneNumber(raw) {
+        if (raw == null) return '';
+        let str = toAsciiDigits(String(raw)).trim().replace(/[\s\-\+\(\)\.]/g, '');
+        if (!/^\d+$/.test(str)) return '';
+        // Standard Iranian prefix conversions:
+        if (str.startsWith('00989') && str.length === 14) str = '0' + str.slice(4);
+        else if (str.startsWith('989') && str.length === 12) str = '0' + str.slice(2);
+        else if (str.startsWith('9') && str.length === 10) str = '0' + str;
+        // Valid mobile: 11 digits starting with 09
+        if (/^09\d{9}$/.test(str)) return str;
+        // Valid landline with area code: 11 digits starting with 0
+        if (/^0\d{10}$/.test(str)) return str;
+        return '';
+    }
+
+    function isChaparWaybill(wb) {
+        if (!wb || typeof wb !== 'string') return false;
+        const cleanWb = wb.trim();
+        if (/^\d{20,24}$/.test(cleanWb) && !cleanWb.startsWith('5410') && !cleanWb.startsWith('5480') && !cleanWb.startsWith('6410')) {
+            return false;
+        }
+        return cleanWb.startsWith('5410') || cleanWb.startsWith('5480') || cleanWb.startsWith('6410') || cleanWb.startsWith('54') || cleanWb.startsWith('64');
+    }
+
     // ==========================================
     // 0. MAIN-WORLD SCRIPT INJECTION (FALLBACK)
     // ==========================================
     function ensureMainScriptInjected() {
-        if (document.getElementById('cx-injected-main')) return;
+        if (document.documentElement.getAttribute('data-cx-main-injected') === 'true' || document.getElementById('cx-injected-main')) return;
         try {
             const script = document.createElement('script');
             script.id = 'cx-injected-main';
@@ -49,6 +73,351 @@
     // ==========================================
     // 1. FLOATING BAR INJECTION (Shadow DOM)
     // ==========================================
+    // 1. FLOATING BAR INJECTION & GEOMETRY (Shadow DOM)
+    // ==========================================
+
+    let lastSavedPosition = null; // Explicit user preference { x, y }
+    let lastUserDragTimestamp = 0; // Guard against stale storage response race
+    let currentRenderedPosition = null; // Rendered coordinate { x, y }
+    let currentLayoutMode = 'horizontal';
+    let panelRestoreSeq = 0;
+    let panelResizeObserver = null;
+
+    function clampPosition(x, y, panelW, panelH, viewW = (typeof window !== 'undefined' ? window.innerWidth : 1920), viewH = (typeof window !== 'undefined' ? window.innerHeight : 1080)) {
+        const safeViewW = Math.max(100, typeof viewW === 'number' && !Number.isNaN(viewW) ? viewW : 1920);
+        const safeViewH = Math.max(100, typeof viewH === 'number' && !Number.isNaN(viewH) ? viewH : 1080);
+        const safePanelW = Math.max(0, typeof panelW === 'number' && !Number.isNaN(panelW) ? panelW : 0);
+        const safePanelH = Math.max(0, typeof panelH === 'number' && !Number.isNaN(panelH) ? panelH : 0);
+
+        const maxX = Math.max(0, safeViewW - safePanelW);
+        const maxY = Math.max(0, safeViewH - safePanelH);
+
+        const safeX = typeof x === 'number' && !Number.isNaN(x) ? Math.round(x) : 0;
+        const safeY = typeof y === 'number' && !Number.isNaN(y) ? Math.round(y) : 0;
+
+        return {
+            x: Math.max(0, Math.min(safeX, maxX)),
+            y: Math.max(0, Math.min(safeY, maxY))
+        };
+    }
+
+    function revalidatePanelGeometry(panel, reason = 'auto') {
+        if (!panel) return null;
+        const viewW = typeof window !== 'undefined' ? window.innerWidth : 1920;
+        const viewH = typeof window !== 'undefined' ? window.innerHeight : 1080;
+
+        const rect = panel.getBoundingClientRect ? panel.getBoundingClientRect() : { width: panel.offsetWidth || 0, height: panel.offsetHeight || 0 };
+        const w = rect.width || panel.offsetWidth || 0;
+        const h = rect.height || panel.offsetHeight || 0;
+
+        if (w === 0 && h === 0 && (!panel.parentNode || panel.offsetParent === null)) {
+            return null;
+        }
+
+        let targetX;
+        let targetY;
+
+        if (lastSavedPosition && typeof lastSavedPosition.x === 'number' && typeof lastSavedPosition.y === 'number' && !Number.isNaN(lastSavedPosition.x) && !Number.isNaN(lastSavedPosition.y)) {
+            // Respect user's explicit saved preference
+            targetX = lastSavedPosition.x;
+            targetY = lastSavedPosition.y;
+        } else if (panel.style.left && panel.style.left !== 'auto') {
+            targetX = parseFloat(panel.style.left) || 0;
+            targetY = parseFloat(panel.style.top) || 0;
+        } else {
+            // Default placement (right: 80px, bottom: 15px)
+            targetX = Math.max(0, viewW - w - 80);
+            targetY = Math.max(0, viewH - h - 15);
+        }
+
+        const clamped = clampPosition(targetX, targetY, w, h, viewW, viewH);
+
+        const curLeft = parseFloat(panel.style.left);
+        const curTop = parseFloat(panel.style.top);
+
+        if (Number.isNaN(curLeft) || Number.isNaN(curTop) || curLeft !== clamped.x || curTop !== clamped.y || panel.style.right !== 'auto') {
+            panel.style.left = clamped.x + 'px';
+            panel.style.top = clamped.y + 'px';
+            panel.style.right = 'auto';
+            panel.style.bottom = 'auto';
+        }
+
+        currentRenderedPosition = { x: clamped.x, y: clamped.y };
+        return clamped;
+    }
+
+    function applyPanelPosition(panel, x, y, options = {}) {
+        if (!panel) return { x: 0, y: 0 };
+        const viewW = options.viewW ?? (typeof window !== 'undefined' ? window.innerWidth : 1920);
+        const viewH = options.viewH ?? (typeof window !== 'undefined' ? window.innerHeight : 1080);
+
+        const rect = panel.getBoundingClientRect ? panel.getBoundingClientRect() : { width: panel.offsetWidth || 0, height: panel.offsetHeight || 0 };
+        const w = rect.width || panel.offsetWidth || 0;
+        const h = rect.height || panel.offsetHeight || 0;
+
+        const clamped = clampPosition(x, y, w, h, viewW, viewH);
+        panel.style.left = clamped.x + 'px';
+        panel.style.top = clamped.y + 'px';
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+
+        currentRenderedPosition = { x: clamped.x, y: clamped.y };
+
+        if (options.saveUserPreference) {
+            lastSavedPosition = { x: clamped.x, y: clamped.y };
+            lastUserDragTimestamp = Date.now();
+            if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
+                try {
+                    chrome.storage.local.set({ cxPanelPosition: lastSavedPosition });
+                } catch (_) {}
+            }
+        }
+
+        return clamped;
+    }
+
+    function setupPanelResizeObserver(panel) {
+        if (!panel || panel.dataset.observerAttached === 'true') return;
+        panel.dataset.observerAttached = 'true';
+
+        if (typeof ResizeObserver !== 'undefined') {
+            try {
+                panelResizeObserver = new ResizeObserver(() => {
+                    revalidatePanelGeometry(panel, 'resize-observer');
+                });
+                panelResizeObserver.observe(panel);
+            } catch (_) {}
+        }
+    }
+
+    function applyPanelLayout(panel, mode, save = true) {
+        if (!panel) return;
+        const isCompact = mode === 'compact';
+        currentLayoutMode = isCompact ? 'compact' : 'horizontal';
+        panel.classList.toggle('cx-compact', isCompact);
+
+        // Update layout toggle icon & accessible label
+        const layoutBtn = panel.querySelector('#cx-layout-toggle-bar');
+        if (layoutBtn) {
+            const iconSpan = layoutBtn.querySelector('.cx-layout-icon');
+            if (isCompact) {
+                if (iconSpan) iconSpan.textContent = '🗖';
+                layoutBtn.setAttribute('aria-label', 'تغییر چیدمان به حالت افقی');
+                layoutBtn.setAttribute('title', 'تغییر چیدمان به حالت افقی');
+            } else {
+                if (iconSpan) iconSpan.textContent = '⊞';
+                layoutBtn.setAttribute('aria-label', 'تغییر چیدمان به حالت فشرده');
+                layoutBtn.setAttribute('title', 'تغییر چیدمان به حالت فشرده');
+            }
+        }
+
+        // Revalidate geometry with new layout metrics immediately
+        revalidatePanelGeometry(panel, 'layout-toggle');
+
+        // Secondary check via RAF to guarantee final settled dimensions
+        if (typeof requestAnimationFrame !== 'undefined') {
+            requestAnimationFrame(() => {
+                revalidatePanelGeometry(panel, 'layout-toggle-raf');
+            });
+        }
+
+        if (save && typeof chrome !== 'undefined' && chrome?.storage?.local) {
+            try {
+                chrome.storage.local.set({ cxPanelLayout: currentLayoutMode });
+            } catch (_) {}
+        }
+    }
+
+    function initPanelDraggable(panel) {
+        if (!panel || panel.dataset.dragInitialized === 'true') return;
+        panel.dataset.dragInitialized = 'true';
+
+        const handle = panel.querySelector('#cx-drag-handle');
+        if (!handle) return;
+
+        let isPointerDown = false;
+        let isDragging = false;
+        let startX = 0;
+        let startY = 0;
+        let startLeft = 0;
+        let startTop = 0;
+        let pointerId = null;
+
+        handle.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0) return; // Primary left click only
+            isPointerDown = true;
+            isDragging = false;
+            startX = e.clientX;
+            startY = e.clientY;
+            pointerId = e.pointerId;
+
+            const rect = panel.getBoundingClientRect ? panel.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+            startLeft = rect.left;
+            startTop = rect.top;
+
+            if (typeof handle.setPointerCapture === 'function' && pointerId !== null) {
+                try {
+                    handle.setPointerCapture(pointerId);
+                } catch (_) {}
+            }
+        });
+
+        handle.addEventListener('pointermove', (e) => {
+            if (!isPointerDown) return;
+
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+
+            // 4px drag threshold prevents accidental drags on simple click
+            if (!isDragging) {
+                if (Math.hypot(dx, dy) >= 4) {
+                    isDragging = true;
+                    panel.classList.add('cx-dragging');
+                } else {
+                    return;
+                }
+            }
+
+            const rect = panel.getBoundingClientRect ? panel.getBoundingClientRect() : { width: 0, height: 0 };
+            const targetX = startLeft + dx;
+            const targetY = startTop + dy;
+            const clamped = clampPosition(targetX, targetY, rect.width, rect.height);
+
+            panel.style.left = clamped.x + 'px';
+            panel.style.top = clamped.y + 'px';
+            panel.style.right = 'auto';
+            panel.style.bottom = 'auto';
+            currentRenderedPosition = clamped;
+        });
+
+        const endDrag = () => {
+            if (!isPointerDown) return;
+            isPointerDown = false;
+
+            if (pointerId !== null && typeof handle.releasePointerCapture === 'function') {
+                try {
+                    handle.releasePointerCapture(pointerId);
+                } catch (_) {}
+                pointerId = null;
+            }
+
+            if (isDragging) {
+                isDragging = false;
+                panel.classList.remove('cx-dragging');
+
+                const rect = panel.getBoundingClientRect ? panel.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+                const curX = parseFloat(panel.style.left) || rect.left;
+                const curY = parseFloat(panel.style.top) || rect.top;
+                const clamped = clampPosition(curX, curY, rect.width, rect.height);
+
+                panel.style.left = clamped.x + 'px';
+                panel.style.top = clamped.y + 'px';
+                panel.style.right = 'auto';
+                panel.style.bottom = 'auto';
+
+                // Save user preference
+                lastSavedPosition = { x: clamped.x, y: clamped.y };
+                lastUserDragTimestamp = Date.now();
+                currentRenderedPosition = clamped;
+
+                if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
+                    try {
+                        chrome.storage.local.set({ cxPanelPosition: lastSavedPosition });
+                    } catch (_) {}
+                }
+            }
+        };
+
+        handle.addEventListener('pointerup', endDrag);
+        handle.addEventListener('pointercancel', endDrag);
+
+        // Directional keyboard controls when drag handle has focus
+        handle.addEventListener('keydown', (e) => {
+            const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
+            if (!keys.includes(e.key)) return;
+
+            e.preventDefault();
+            const step = e.shiftKey ? 30 : 10;
+            const rect = panel.getBoundingClientRect ? panel.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+            let curX = parseFloat(panel.style.left);
+            let curY = parseFloat(panel.style.top);
+            if (Number.isNaN(curX) || !panel.style.left || panel.style.left === 'auto') curX = rect.left;
+            if (Number.isNaN(curY) || !panel.style.top || panel.style.top === 'auto') curY = rect.top;
+
+            if (e.key === 'ArrowLeft') curX -= step;
+            else if (e.key === 'ArrowRight') curX += step;
+            else if (e.key === 'ArrowUp') curY -= step;
+            else if (e.key === 'ArrowDown') curY += step;
+            else if (e.key === 'Home') { curX = 0; curY = 0; }
+            else if (e.key === 'End') {
+                curX = (typeof window !== 'undefined' ? window.innerWidth : 1920) - rect.width;
+                curY = (typeof window !== 'undefined' ? window.innerHeight : 1080) - rect.height;
+            }
+
+            const clamped = clampPosition(curX, curY, rect.width, rect.height);
+            panel.style.left = clamped.x + 'px';
+            panel.style.top = clamped.y + 'px';
+            panel.style.right = 'auto';
+            panel.style.bottom = 'auto';
+
+            lastSavedPosition = { x: clamped.x, y: clamped.y };
+            lastUserDragTimestamp = Date.now();
+            currentRenderedPosition = clamped;
+
+            if (typeof chrome !== 'undefined' && chrome?.storage?.local) {
+                try {
+                    chrome.storage.local.set({ cxPanelPosition: lastSavedPosition });
+                } catch (_) {}
+            }
+        });
+
+        // Window resize handler: re-clamp panel if it goes outside viewport
+        if (typeof window !== 'undefined') {
+            window.addEventListener('resize', () => {
+                revalidatePanelGeometry(panel, 'window-resize');
+            });
+        }
+    }
+
+    function restorePanelPositionAndLayout(panel) {
+        if (!panel || typeof chrome === 'undefined' || !chrome?.storage?.local) return;
+        const currentSeq = ++panelRestoreSeq;
+
+        chrome.storage.local.get(['cxPanelPosition', 'cxPanelLayout'], (res) => {
+            if (currentSeq !== panelRestoreSeq) return;
+            if (Date.now() - lastUserDragTimestamp < 1000) return;
+
+            // 1. Layout restore
+            const isCompact = res?.cxPanelLayout === 'compact';
+            applyPanelLayout(panel, isCompact ? 'compact' : 'horizontal', false);
+
+            // 2. Position restore
+            if (res?.cxPanelPosition && typeof res.cxPanelPosition.x === 'number' && typeof res.cxPanelPosition.y === 'number' && !Number.isNaN(res.cxPanelPosition.x) && !Number.isNaN(res.cxPanelPosition.y)) {
+                lastSavedPosition = { x: res.cxPanelPosition.x, y: res.cxPanelPosition.y };
+            }
+
+            revalidatePanelGeometry(panel, 'storage-restore');
+        });
+    }
+
+    // Expose helpers for testing & extension introspection
+    if (typeof window !== 'undefined') {
+        window.__DELIVERY_ASSISTANT_PANEL__ = {
+            clampPosition,
+            applyPanelPosition,
+            applyPanelLayout,
+            revalidatePanelGeometry,
+            setupPanelResizeObserver,
+            initPanelDraggable,
+            restorePanelPositionAndLayout,
+            getLastSavedPosition: () => lastSavedPosition,
+            getCurrentRenderedPosition: () => currentRenderedPosition,
+            getCurrentLayoutMode: () => currentLayoutMode,
+            setLastSavedPosition: (pos) => { lastSavedPosition = pos; },
+            setLastUserDragTimestamp: (ts) => { lastUserDragTimestamp = ts; }
+        };
+    }
+
     function ensurePanelExists() {
         // getExtensionRoot is globally available via ui-render.js
         const root = typeof getExtensionRoot === 'function' ? getExtensionRoot() : null;
@@ -63,6 +432,10 @@
         const themeAriaLabel = typeof _getThemeAriaLabel === 'function' ? _getThemeAriaLabel() : 'تغییر تم';
 
         panel.innerHTML = `
+            <button type="button" class="cx-drag-handle" id="cx-drag-handle" aria-label="جابجایی پنل" title="جابجایی پنل (درگ با ماوس یا کلیدهای جهت‌نما)" tabindex="0">
+                <span class="cx-drag-handle-icon" aria-hidden="true">⠿</span>
+            </button>
+
             <div class="cx-floating-bar-info">
                 <div class="cx-customer-name" id="chapar-name" title="مشتری فعال">👇 روی ردیف کلیک کنید 👇</div>
                 <div class="cx-order-chip" id="cx-order-chip" style="display: none;"></div>
@@ -87,15 +460,55 @@
                         <span>بررسی تیکت Jira</span>
                     </button>
                 </div>
+                <div class="cx-gojira-widget" id="cx-gojira-widget">
+                    <button class="cx-btn-trigger btn-gojira" id="btn-gojira-trigger" disabled aria-haspopup="listbox" aria-expanded="false" aria-label="GoJira: آماده‌سازی تیکت Jira" title="برای آماده‌سازی تیکت ابتدا یک ردیف را انتخاب کنید">
+                        <span>⚡</span>
+                        <span>GoJira</span>
+                    </button>
+                    <div class="cx-gojira-menu" id="cx-gojira-menu" role="listbox" style="display: none;" aria-label="انتخاب الگوی GoJira">
+                        <div class="cx-gojira-menu-header">
+                            <div class="cx-gojira-header-title">
+                                <span class="cx-gojira-header-icon" aria-hidden="true">🚀</span>
+                                <span>آماده‌سازی تیکت Jira</span>
+                            </div>
+                        </div>
+                        <div class="cx-gojira-menu-body">
+                            <div class="cx-gojira-menu-item" role="option" tabindex="0" data-template-id="danandeh" aria-label="الگوی منیره داننده: Platform / Task">
+                                <div class="cx-gojira-item-main">
+                                    <span class="cx-gojira-item-icon" aria-hidden="true">📋</span>
+                                    <div class="cx-gojira-item-info">
+                                        <span class="cx-gojira-item-name">منیره <span>داننده</span></span>
+                                        <span class="cx-gojira-item-sub">Platform / Task</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="cx-bar-divider" aria-hidden="true"></div>
 
             <div class="cx-utilities-group">
+                <button type="button" class="cx-layout-toggle" id="cx-layout-toggle-bar" aria-label="تغییر چیدمان به حالت فشرده" title="تغییر چیدمان به حالت فشرده">
+                    <span class="cx-layout-icon" aria-hidden="true">⊞</span>
+                </button>
                 <button class="cx-settings-toggle" id="cx-settings-toggle-bar" aria-label="تنظیمات افزونه" title="تنظیمات افزونه">⚙️</button>
                 <button class="cx-theme-toggle" id="cx-theme-toggle-bar" aria-label="${themeAriaLabel}" title="${themeAriaLabel}">${themeIcon}</button>
             </div>
         `;
+
+        // Initialize drag interaction
+        initPanelDraggable(panel);
+
+        // Attach layout toggle listener
+        const layoutBtn = panel.querySelector('#cx-layout-toggle-bar');
+        if (layoutBtn) {
+            layoutBtn.addEventListener('click', () => {
+                const isCompact = panel.classList.contains('cx-compact');
+                applyPanelLayout(panel, isCompact ? 'horizontal' : 'compact', true);
+            });
+        }
 
         // Attach theme toggle listener
         const themeBtn = panel.querySelector('#cx-theme-toggle-bar');
@@ -132,7 +545,19 @@
             });
         }
 
+        // Initialize GoJira widget interaction listeners
+        initGojiraWidgetListeners(panel);
+
+        // Setup ResizeObserver for dynamic boundary clamping
+        setupPanelResizeObserver(panel);
+
         root.appendChild(panel);
+
+        // Restore saved position and layout
+        restorePanelPositionAndLayout(panel);
+
+        // Initial geometry validation
+        revalidatePanelGeometry(panel, 'initial-mount');
     }
 
     // Clean up any legacy pending filter style if present
@@ -165,6 +590,27 @@
                     const enabled = !!changes.cxHidePendingPayment.newValue;
                     document.documentElement.setAttribute('data-cx-hide-pending', enabled ? 'true' : 'false');
                     filterPendingPaymentOrders();
+                }
+                if (changes.cxPanelLayout && changes.cxPanelLayout.newValue) {
+                    const newLayout = changes.cxPanelLayout.newValue;
+                    const root = typeof getExtensionRoot === 'function' ? getExtensionRoot() : null;
+                    const panel = root ? root.querySelector('.cx-floating-bar') : null;
+                    if (panel && newLayout !== currentLayoutMode) {
+                        applyPanelLayout(panel, newLayout, false);
+                    }
+                }
+                if (changes.cxPanelPosition && changes.cxPanelPosition.newValue) {
+                    const newPos = changes.cxPanelPosition.newValue;
+                    if (Date.now() - lastUserDragTimestamp > 600) {
+                        if (typeof newPos.x === 'number' && typeof newPos.y === 'number' && !Number.isNaN(newPos.x) && !Number.isNaN(newPos.y)) {
+                            lastSavedPosition = { x: newPos.x, y: newPos.y };
+                            const root = typeof getExtensionRoot === 'function' ? getExtensionRoot() : null;
+                            const panel = root ? root.querySelector('.cx-floating-bar') : null;
+                            if (panel) {
+                                revalidatePanelGeometry(panel, 'storage-sync');
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -217,6 +663,7 @@
         }
 
         updateJiraWidgetForSelectedRow('', '', false);
+        updateGojiraWidgetForSelectedRow('', '', false);
 
         if (window.CX_SHORTCUTS && typeof window.CX_SHORTCUTS.setOrderContext === 'function') {
             window.CX_SHORTCUTS.setOrderContext({
@@ -226,6 +673,11 @@
                 waybill: '',
                 name: ''
             });
+        }
+
+        const panel = root.querySelector('.cx-floating-bar');
+        if (panel) {
+            revalidatePanelGeometry(panel, 'row-deselection');
         }
     }
 
@@ -242,7 +694,6 @@
     setInterval(() => {
         checkRouteChange();
         ensurePanelExists();
-        ensurePendingFilterStyle();
 
         // Check if pagination exists and needs to be set to 100
         if (document.documentElement.getAttribute('data-cx-always-100') === 'true') {
@@ -283,7 +734,7 @@
             }
 
             rows.forEach(row => {
-                const rowId = row.getAttribute('data-id') || row.getAttribute('data-rowindex');
+                const rowId = row.getAttribute('data-id');
                 if (!rowId) return;
 
                 let entry = rowDataCache.get(rowId);
@@ -299,8 +750,9 @@
                         if (cell) {
                             const content = cell.querySelector('.MuiDataGrid-cellContent');
                             const text = (content ? content.innerText : cell.innerText).trim();
-                            if (text && text.length >= 7) {
-                                entry.phone = text;
+                            const normPhone = normalizePhoneNumber(text);
+                            if (normPhone) {
+                                entry.phone = normPhone;
                                 entry.updatedAt = Date.now();
                                 break;
                             }
@@ -558,7 +1010,7 @@
         // Run a quick cache update to capture current DOM state
         updateRowCacheFromDOM();
 
-        const rowId = row.getAttribute('data-id') || row.getAttribute('data-rowindex');
+        const rowId = row.getAttribute('data-id');
         const cached = rowId ? rowDataCache.get(rowId) : null;
 
         // Failsafe Diagnostic Export Tool (Alt+Click)
@@ -593,10 +1045,10 @@
         // Tier 3: Persistent Row Cache (historical observations across horizontal/vertical scroll)
 
         // 1. Phone Number
-        let phone = (fiberData && fiberData.phone) ? fiberData.phone : '';
-        if (!phone) phone = extractData(rowFragments, FIELDS.phone);
-        if (!phone && cached && cached.phone) phone = cached.phone;
-        phone = toAsciiDigits(phone).trim();
+        let rawPhone = (fiberData && fiberData.phone) ? fiberData.phone : '';
+        if (!rawPhone) rawPhone = extractData(rowFragments, FIELDS.phone);
+        if (!rawPhone && cached && cached.phone) rawPhone = cached.phone;
+        let phone = normalizePhoneNumber(rawPhone);
 
         // 2. Waybill / Barcode
         let waybill = (fiberData && fiberData.waybill) ? fiberData.waybill : '';
@@ -613,8 +1065,8 @@
         if (!name) name = extractName(rowFragments);
         if ((!name || name === 'مشتری انتخاب شد') && cached && cached.name) name = cached.name;
         activeCustomerName = name || 'مشتری انتخاب شد';
-        activeCustomerPhone = phone || (cached && cached.phone) || '';
-        activeCustomerWaybill = waybill || (cached && cached.waybill) || '';
+        activeCustomerPhone = phone;
+        activeCustomerWaybill = waybill;
 
         // 4. Order ID
         let orderId = (fiberData && fiberData.orderId) ? fiberData.orderId : '';
@@ -630,6 +1082,9 @@
             parcelId = extractData(rowFragments, domParcelKeys);
         }
         if (!parcelId && cached && cached.parcelId) parcelId = cached.parcelId;
+        if (!parcelId && window.location.pathname.startsWith('/parcel') && rowId && /^\d+$/.test(rowId)) {
+            parcelId = rowId;
+        }
         parcelId = toAsciiDigits(parcelId).trim();
 
         // Update the cache with any newly discovered fields for this row
@@ -678,14 +1133,14 @@
         const waybillWidget = root.querySelector('#cx-waybill-widget');
 
         if (phoneWidget) {
-            if (phone.length > 5) activateBtn(phoneWidget, "📱 موبایل: " + phone, 'گیرنده', phone, false, 'btn-phone');
+            if (phone) activateBtn(phoneWidget, "📱 موبایل: " + phone, 'گیرنده', phone, false, 'btn-phone');
             else deactivateBtn(phoneWidget, "📱 موبایل: ندارد", 'btn-phone');
         }
 
         if (waybillWidget) {
             // HYBRID ROUTING LOGIC (Prefix Scanner & Contextual Classifier)
             if (waybill.length > 2) {
-                if (waybill.startsWith('5410') || waybill.startsWith('5480') || waybill.startsWith('6410') || waybill.startsWith('54') || waybill.startsWith('64')) {
+                if (isChaparWaybill(waybill)) {
                     // Route to Chapar Tracking Engine
                     activateBtn(waybillWidget, "📦 چاپار: " + waybill, 'ConsignmentNo', waybill, false, 'btn-waybill');
                 } else {
@@ -699,6 +1154,15 @@
 
         // 3. Jira Ticket Lookup Widget
         updateJiraWidgetForSelectedRow(parcelId, waybill, true);
+
+        // 4. GoJira Issue Preparation Widget
+        updateGojiraWidgetForSelectedRow(rowId, parcelId || waybill, true);
+
+        // Revalidate panel geometry after row selection content updates
+        const panel = root.querySelector('.cx-floating-bar');
+        if (panel) {
+            revalidatePanelGeometry(panel, 'row-selection');
+        }
     });
 
     // ==========================================
@@ -1006,6 +1470,9 @@
             return;
         }
 
+        isJiraLookupInProgress = true;
+        const currentRowId = activeGojiraSelection?.rowId || '';
+
         // Render Loading State (accessible and prevents duplicate requests)
         widget.innerHTML = `
             <button class="cx-btn-trigger btn-jira loading" disabled aria-busy="true" aria-label="در حال استعلام Jira">
@@ -1035,11 +1502,33 @@
                 return;
             }
 
+            // Cross-row race guard: ensure current active selection still matches rowId
+            if (activeGojiraSelection?.rowId && currentRowId && activeGojiraSelection.rowId !== currentRowId) {
+                console.warn('[Delivery Assistant] Active row changed during lookup, discarding authorization:', { currentRowId, activeRowId: activeGojiraSelection.rowId });
+                return;
+            }
+
+            // Successfully completed Jira check for this record!
+            lastCompletedJiraCheck = {
+                rowId: currentRowId,
+                parcelId: cleanParcel,
+                waybill: cleanWaybill,
+                timestamp: Date.now(),
+                success: true
+            };
+
             const tickets = response.tickets || [];
             renderJiraResultsState(widget, tickets, parcelId, waybill, response.isIncomplete);
+
+            // Promptly synchronize GoJira state and clear any active alert
+            notifyGojiraPrecheckCompleted(currentRowId, cleanParcel, cleanWaybill);
         } catch (err) {
             if (thisSeq !== currentJiraSeq) return;
             renderJiraErrorState(widget, { error: 'EXCEPTION', message: err.message }, parcelId, waybill);
+        } finally {
+            if (thisSeq === currentJiraSeq) {
+                isJiraLookupInProgress = false;
+            }
         }
     }
 
@@ -1237,6 +1726,399 @@
         }
     }
 
+    // ==========================================
+    // 5.1. GOJIRA TICKET PREPARATION & TEMPLATES
+    // ==========================================
+    let activeGojiraSelection = { rowId: '', trackingNumber: '', storeName: '' };
+    let isGojiraInProgress = false;
+    let lastCompletedJiraCheck = null;
+    let isJiraLookupInProgress = false;
+    let gojiraAlertTimeout = null;
+
+    function isGojiraCheckSatisfied() {
+        if (!activeGojiraSelection || !activeGojiraSelection.hasSelectedRow || !activeGojiraSelection.rowId) {
+            return false;
+        }
+        if (isJiraLookupInProgress) {
+            return false;
+        }
+        if (!lastCompletedJiraCheck || !lastCompletedJiraCheck.success) {
+            return false;
+        }
+        // Identity Scoping: A successful check for row A must NEVER authorize row B
+        if (lastCompletedJiraCheck.rowId && activeGojiraSelection.rowId && lastCompletedJiraCheck.rowId !== activeGojiraSelection.rowId) {
+            return false;
+        }
+        if (activeGojiraSelection.trackingNumber && (lastCompletedJiraCheck.parcelId || lastCompletedJiraCheck.waybill)) {
+            const matchesTracking = lastCompletedJiraCheck.parcelId === activeGojiraSelection.trackingNumber ||
+                lastCompletedJiraCheck.waybill === activeGojiraSelection.trackingNumber;
+            if (!matchesTracking) {
+                return false;
+            }
+        }
+        const matchesRowId = lastCompletedJiraCheck.rowId && lastCompletedJiraCheck.rowId === activeGojiraSelection.rowId;
+        const matchesTracking = activeGojiraSelection.trackingNumber && (
+            lastCompletedJiraCheck.parcelId === activeGojiraSelection.trackingNumber ||
+            lastCompletedJiraCheck.waybill === activeGojiraSelection.trackingNumber
+        );
+        return Boolean(matchesRowId || matchesTracking);
+    }
+
+    function notifyGojiraPrecheckCompleted(checkedRowId, parcelId, waybill) {
+        if (!activeGojiraSelection || !activeGojiraSelection.hasSelectedRow || !activeGojiraSelection.rowId) {
+            return;
+        }
+        if (checkedRowId && activeGojiraSelection.rowId !== checkedRowId) {
+            return;
+        }
+        if (activeGojiraSelection.trackingNumber && (parcelId || waybill)) {
+            if (activeGojiraSelection.trackingNumber !== parcelId && activeGojiraSelection.trackingNumber !== waybill) {
+                return;
+            }
+        }
+
+        // Promptly disarm warning alert and restore ready state without waiting for timeout
+        if (gojiraAlertTimeout) {
+            clearTimeout(gojiraAlertTimeout);
+            gojiraAlertTimeout = null;
+        }
+
+        const root = typeof getExtensionRoot === 'function' ? getExtensionRoot() : null;
+        if (!root) return;
+        const triggerBtn = root.querySelector('#btn-gojira-trigger');
+        if (!triggerBtn) return;
+
+        triggerBtn.classList.remove('cx-gojira-alert');
+        triggerBtn.innerHTML = `<span>⚡</span><span>GoJira</span>`;
+        triggerBtn.disabled = false;
+        triggerBtn.setAttribute('title', 'آماده‌سازی تیکت GoJira');
+        triggerBtn.setAttribute('aria-label', 'GoJira: آماده‌سازی تیکت Jira');
+    }
+
+    function showGojiraPrecheckAlert(triggerBtn) {
+        if (!triggerBtn) return;
+        if (gojiraAlertTimeout) {
+            clearTimeout(gojiraAlertTimeout);
+            gojiraAlertTimeout = null;
+        }
+
+        const originalHTML = `<span>⚡</span><span>GoJira</span>`;
+        triggerBtn.classList.add('cx-gojira-alert');
+        triggerBtn.innerHTML = `<span>⚠️</span><span>اول چک کن</span>`;
+        triggerBtn.setAttribute('title', 'ابتدا باید بررسی تیکت Jira برای این مرسوله انجام شود');
+
+        gojiraAlertTimeout = setTimeout(() => {
+            triggerBtn.classList.remove('cx-gojira-alert');
+            triggerBtn.innerHTML = originalHTML;
+            triggerBtn.setAttribute('title', 'آماده‌سازی تیکت GoJira');
+            gojiraAlertTimeout = null;
+        }, 3000);
+    }
+
+    function closeGojiraDropdown() {
+        const root = typeof getExtensionRoot === 'function' ? getExtensionRoot() : null;
+        if (!root) return;
+        const menu = root.querySelector('#cx-gojira-menu');
+        const triggerBtn = root.querySelector('#btn-gojira-trigger');
+        if (menu) menu.style.display = 'none';
+        if (triggerBtn) triggerBtn.setAttribute('aria-expanded', 'false');
+    }
+
+    // Close GoJira dropdown on outside click or Escape key
+    document.addEventListener('click', (e) => {
+        const root = typeof getExtensionRoot === 'function' ? getExtensionRoot() : null;
+        if (!root) return;
+        const widget = root.querySelector('#cx-gojira-widget');
+        if (widget && !e.composedPath().includes(widget)) {
+            closeGojiraDropdown();
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeGojiraDropdown();
+        }
+    });
+
+    function initGojiraWidgetListeners(root) {
+        if (!root) return;
+        const widget = root.querySelector('#cx-gojira-widget');
+        if (!widget) return;
+        const triggerBtn = widget.querySelector('#btn-gojira-trigger');
+        const menu = widget.querySelector('#cx-gojira-menu');
+        if (!triggerBtn || !menu) return;
+
+        // Attach trigger toggle listener (if not already attached)
+        if (!triggerBtn.dataset.listenerAttached) {
+            triggerBtn.dataset.listenerAttached = 'true';
+            triggerBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (triggerBtn.disabled || isGojiraInProgress) return;
+
+                // Problem C Gate: Operator must perform Jira check first for this record
+                if (!isGojiraCheckSatisfied()) {
+                    showGojiraPrecheckAlert(triggerBtn);
+                    return;
+                }
+
+                const isCurrentlyOpen = menu.style.display !== 'none';
+                if (isCurrentlyOpen) {
+                    closeGojiraDropdown();
+                } else {
+                    closeJiraDropdown(); // Close existing jira dropdown if open
+                    menu.style.display = 'flex';
+                    triggerBtn.setAttribute('aria-expanded', 'true');
+                    const firstOption = menu.querySelector('.cx-gojira-menu-item');
+                    if (firstOption) firstOption.focus();
+                }
+            });
+        }
+
+        // Attach template items listener
+        const menuItems = menu.querySelectorAll('.cx-gojira-menu-item');
+        menuItems.forEach((item, index) => {
+            if (item.dataset.listenerAttached) return;
+            item.dataset.listenerAttached = 'true';
+
+            item.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const templateId = item.getAttribute('data-template-id') || 'danandeh';
+                executeGojiraPreparation(templateId);
+            });
+
+            item.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    const templateId = item.getAttribute('data-template-id') || 'danandeh';
+                    executeGojiraPreparation(templateId);
+                } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const next = menuItems[index + 1] || menuItems[0];
+                    if (next) next.focus();
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const prev = menuItems[index - 1] || menuItems[menuItems.length - 1];
+                    if (prev) prev.focus();
+                }
+            });
+        });
+    }
+
+    function updateGojiraWidgetForSelectedRow(rowId, trackingNumber, hasSelectedRow = true) {
+        closeGojiraDropdown();
+
+        if (gojiraAlertTimeout) {
+            clearTimeout(gojiraAlertTimeout);
+            gojiraAlertTimeout = null;
+            const root = typeof getExtensionRoot === 'function' ? getExtensionRoot() : null;
+            const triggerBtn = root?.querySelector('#btn-gojira-trigger');
+            if (triggerBtn) {
+                triggerBtn.classList.remove('cx-gojira-alert');
+                triggerBtn.innerHTML = `<span>⚡</span><span>GoJira</span>`;
+            }
+        }
+
+        const cleanRowId = hasSelectedRow && rowId != null ? String(rowId).trim() : '';
+        const isSelected = !!(hasSelectedRow && cleanRowId);
+
+        let validTracking = trackingNumber && !/[\u0600-\u06FF]/.test(trackingNumber) && !/^(null|undefined|none|n\/a|-+)$/i.test(trackingNumber) ? String(trackingNumber).trim() : '';
+
+        // If trackingNumber was not passed, resolve from cache or rowId fallback on parcel route
+        if (isSelected && !validTracking) {
+            const cached = rowDataCache.get(cleanRowId);
+            if (cached?.parcelId && !/[\u0600-\u06FF]/.test(cached.parcelId)) validTracking = String(cached.parcelId).trim();
+            else if (cached?.waybill && !/[\u0600-\u06FF]/.test(cached.waybill)) validTracking = String(cached.waybill).trim();
+            else if (window.location.pathname.startsWith('/parcel') && /^\d+$/.test(cleanRowId)) validTracking = cleanRowId;
+        }
+
+        activeGojiraSelection = {
+            rowId: cleanRowId,
+            trackingNumber: validTracking,
+            storeName: isSelected ? (rowDataCache.get(cleanRowId)?.storeName || '') : '',
+            hasSelectedRow: isSelected
+        };
+
+        const root = typeof getExtensionRoot === 'function' ? getExtensionRoot() : null;
+        if (!root) return;
+        const widget = root.querySelector('#cx-gojira-widget');
+        if (!widget) return;
+
+        // Ensure listeners are always attached
+        initGojiraWidgetListeners(root);
+
+        const triggerBtn = widget.querySelector('#btn-gojira-trigger');
+        if (!triggerBtn) return;
+
+        if (!isSelected) {
+            triggerBtn.disabled = true;
+            triggerBtn.setAttribute('aria-label', 'GoJira: آماده‌سازی تیکت Jira');
+            triggerBtn.setAttribute('title', 'برای آماده‌سازی تیکت ابتدا یک ردیف را انتخاب کنید');
+            return;
+        }
+
+        // A valid Automoby record is selected: GoJira is independently enabled
+        triggerBtn.disabled = false;
+        if (validTracking) {
+            triggerBtn.setAttribute('aria-label', `GoJira: آماده‌سازی تیکت Jira برای مرسوله ${_esc(validTracking)}`);
+            triggerBtn.setAttribute('title', `آماده‌سازی تیکت GoJira برای مرسوله ${_esc(validTracking)}`);
+        } else {
+            triggerBtn.setAttribute('aria-label', 'GoJira: آماده‌سازی تیکت Jira');
+            triggerBtn.setAttribute('title', 'آماده‌سازی تیکت GoJira');
+        }
+    }
+
+    async function extractStoreNameForSelectedRow(rowId) {
+        if (!rowId) return '';
+        const cached = rowDataCache.get(rowId);
+        if (cached && cached.storeName && typeof cached.storeName === 'string' && cached.storeName.trim().length >= 2) {
+            return cached.storeName.trim();
+        }
+
+        const findStoreNameInDOM = () => {
+            const cells = Array.from(document.querySelectorAll('.MuiDataGrid-detailPanel .MuiDataGrid-cell[data-field="supplier_title"], .MuiDataGrid-detailPanel [data-field="supplier_title"]'));
+            for (const cell of cells) {
+                const txt = (cell.querySelector('.MuiDataGrid-cellContent')?.innerText || cell.innerText || '').trim();
+                if (txt && txt !== 'نام فروشگاه' && !/^(null|undefined|none|n\/a|-+)$/i.test(txt)) {
+                    return txt;
+                }
+            }
+            return '';
+        };
+
+        let store = findStoreNameInDOM();
+        if (store) {
+            if (cached) {
+                cached.storeName = store;
+                rowDataCache.set(rowId, cached);
+            }
+            return store;
+        }
+
+        const row = document.querySelector(`.MuiDataGrid-row[data-id="${rowId}"]`);
+        if (!row) return '';
+
+        const toggleBtn = row.querySelector('button.MuiDataGrid-detailPanelToggleCell, [data-field="__detail_panel_toggle__"] button');
+        if (toggleBtn) {
+            toggleBtn.click();
+        }
+
+        const startTime = Date.now();
+        while (Date.now() - startTime < 3500) {
+            store = findStoreNameInDOM();
+            if (store) break;
+            await new Promise(r => setTimeout(r, 150));
+        }
+
+        if (store && cached) {
+            cached.storeName = store;
+            rowDataCache.set(rowId, cached);
+        }
+        return store;
+    }
+
+    async function executeGojiraPreparation(templateId) {
+        if (isGojiraInProgress) return;
+        const currentSelection = { ...activeGojiraSelection };
+        if (!currentSelection.rowId || !currentSelection.hasSelectedRow) {
+            alert('لطفاً ابتدا یک ردیف را انتخاب کنید.');
+            return;
+        }
+
+        const initialRowId = currentSelection.rowId;
+        let trackingNumber = currentSelection.trackingNumber;
+
+        // Resolve tracking number on-demand if not already populated on row click
+        if (!trackingNumber) {
+            const cached = rowDataCache.get(initialRowId);
+            if (cached?.parcelId && !/[\u0600-\u06FF]/.test(cached.parcelId)) {
+                trackingNumber = String(cached.parcelId).trim();
+            } else if (cached?.waybill && !/[\u0600-\u06FF]/.test(cached.waybill)) {
+                trackingNumber = String(cached.waybill).trim();
+            } else if (window.location.pathname.startsWith('/parcel') && /^\d+$/.test(initialRowId)) {
+                trackingNumber = initialRowId;
+            } else {
+                const row = document.querySelector(`.MuiDataGrid-row[data-id="${initialRowId}"]`);
+                if (row) {
+                    const fragments = getAllRowFragments(row);
+                    const isParcelRoute = window.location.pathname.startsWith('/parcel');
+                    const domKeys = isParcelRoute ? ['parcelId', 'id'] : ['parcelId', 'parcel_id', 'consignmentId', 'shipmentId', 'returnId', 'id'];
+                    const domExtracted = extractData(fragments, domKeys);
+                    if (domExtracted && !/[\u0600-\u06FF]/.test(domExtracted) && /^\d+$/.test(domExtracted)) {
+                        trackingNumber = domExtracted;
+                    }
+                }
+            }
+        }
+
+        if (!trackingNumber) {
+            alert('⚠️ شماره مرسوله یا بارنامه برای این رکورد یافت نشد. لطفاً از صحت اطلاعات ردیف اطمینان حاصل فرمایید.');
+            return;
+        }
+
+        activeGojiraSelection.trackingNumber = trackingNumber;
+        isGojiraInProgress = true;
+        closeGojiraDropdown();
+
+        const root = typeof getExtensionRoot === 'function' ? getExtensionRoot() : null;
+        const triggerBtn = root?.querySelector('#btn-gojira-trigger');
+        const originalHTML = triggerBtn ? triggerBtn.innerHTML : '';
+
+        if (triggerBtn) {
+            triggerBtn.disabled = true;
+            triggerBtn.innerHTML = `<span class="cx-spinner" aria-hidden="true"></span><span>آماده‌سازی...</span>`;
+        }
+
+        try {
+            const storeName = await extractStoreNameForSelectedRow(initialRowId);
+
+            // Stale-state guard: confirm user didn't switch rows during async expansion
+            if (activeGojiraSelection.rowId !== initialRowId) {
+                throw new Error('ردیف انتخابی در حین آماده‌سازی تغییر کرد. فرآیند به منظور جلوگیری از تداخل داده‌ها متوقف شد.');
+            }
+
+            if (!storeName) {
+                throw new Error('نام فروشگاه از جزئیات این ردیف یافت نشد. لطفاً از صحت اطلاعات ردیف اطمینان حاصل فرمایید.');
+            }
+
+            const payload = {
+                templateId: templateId || 'danandeh',
+                trackingNumber,
+                storeName
+            };
+
+            const response = await new Promise((resolve, reject) => {
+                chrome.runtime.sendMessage({ action: 'PREPARE_GOJIRA_ISSUE', payload }, (res) => {
+                    if (chrome.runtime.lastError) {
+                        return reject(new Error(chrome.runtime.lastError.message));
+                    }
+                    resolve(res);
+                });
+            });
+
+            if (!response || !response.success) {
+                throw new Error(response?.message || 'خطا در ارتباط با سرور Jira');
+            }
+
+            if (triggerBtn) {
+                triggerBtn.innerHTML = `<span>✅</span><span>آماده در Jira</span>`;
+                setTimeout(() => {
+                    if (triggerBtn) triggerBtn.innerHTML = originalHTML;
+                }, 2200);
+            }
+        } catch (err) {
+            console.error('[Delivery Assistant GoJira Error]', err);
+            alert(`⚠️ خطا در آماده‌سازی تیکت GoJira:\n${err.message}`);
+            if (triggerBtn) triggerBtn.innerHTML = originalHTML;
+        } finally {
+            isGojiraInProgress = false;
+            if (triggerBtn && activeGojiraSelection.hasSelectedRow) {
+                triggerBtn.disabled = false;
+            }
+        }
+    }
+
     // Diagnostic / MCP Test Bridge (Safe Read-Only Trigger)
     let testBtn = document.getElementById('cx-mcp-test-trigger');
     if (!testBtn) {
@@ -1251,7 +2133,7 @@
         const name = document.documentElement.getAttribute('data-cx-test-name') || '';
         
         // Validate inputs before executing
-        const allowedTypes = ['ConsignmentNo', 'گیرنده', 'TEST_RENDER_MODAL', 'TEST_JIRA_LOOKUP', 'TEST_POST_ACTION', 'TEST_CHAPAR_LOOKUP'];
+        const allowedTypes = ['ConsignmentNo', 'گیرنده', 'TEST_RENDER_MODAL', 'TEST_JIRA_LOOKUP', 'TEST_POST_ACTION', 'TEST_CHAPAR_LOOKUP', 'TEST_GOJIRA_PREPARATION', 'TEST_GOJIRA_EXTRACT'];
         if (!allowedTypes.includes(type)) return;
 
         if (type === 'TEST_POST_ACTION') {
@@ -1300,6 +2182,29 @@
             }
             return;
         }
+
+        if (type === 'TEST_GOJIRA_PREPARATION') {
+            const templateId = document.documentElement.getAttribute('data-cx-test-template-id') || 'danandeh';
+            try {
+                await executeGojiraPreparation(templateId);
+                document.documentElement.setAttribute('data-cx-test-status', 'completed');
+            } catch (err) {
+                document.documentElement.setAttribute('data-cx-test-status', 'error: ' + err.message);
+            }
+            return;
+        }
+
+        if (type === 'TEST_GOJIRA_EXTRACT') {
+            const rowId = document.documentElement.getAttribute('data-cx-test-row-id') || '';
+            try {
+                const store = await extractStoreNameForSelectedRow(rowId);
+                document.documentElement.setAttribute('data-cx-test-store', store || '');
+                document.documentElement.setAttribute('data-cx-test-status', 'completed');
+            } catch (err) {
+                document.documentElement.setAttribute('data-cx-test-status', 'error: ' + err.message);
+            }
+            return;
+        }
         
         const query = toAsciiDigits(rawQuery || '').trim();
         if (!/^[0-9a-zA-Z%_\-\+]{3,40}$/.test(query)) return;
@@ -1319,7 +2224,7 @@
         const waybillWidget = root.querySelector('#cx-waybill-widget');
         if (waybillWidget && waybillWidget.querySelector('.cx-jira-error-badge')) {
             if (activeCustomerWaybill && activeCustomerWaybill.length > 2) {
-                if (activeCustomerWaybill.startsWith('5410') || activeCustomerWaybill.startsWith('5480') || activeCustomerWaybill.startsWith('6410') || activeCustomerWaybill.startsWith('54') || activeCustomerWaybill.startsWith('64')) {
+                if (isChaparWaybill(activeCustomerWaybill)) {
                     activateBtn(waybillWidget, "📦 چاپار: " + activeCustomerWaybill, 'ConsignmentNo', activeCustomerWaybill, false, 'btn-waybill');
                 } else {
                     activateBtn(waybillWidget, "📦 پست: " + activeCustomerWaybill, null, activeCustomerWaybill, true, 'btn-waybill');

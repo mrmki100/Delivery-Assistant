@@ -7,6 +7,7 @@
     "storage",
     "activeTab",
     "tabs",
+    "scripting",
     "declarativeNetRequest",
     "declarativeNetRequestWithHostAccess",
     "nativeMessaging"
@@ -61,6 +62,15 @@
       ],
       "js": [
         "chapar-portal.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://jira.automoby.ir/*"
+      ],
+      "js": [
+        "jira-assistant.js"
       ],
       "run_at": "document_idle"
     }

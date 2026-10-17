@@ -14,10 +14,67 @@ function isPendingPaymentOrder(row) {
     return false;
 }
 
-function filterRowsForDataGrid(rawRows, isHidePending) {
+function getRowReferences(row) {
+    const phone = row.userPhoneNumber
+        || row.phone
+        || row.order?.addressClone?.receiverPhoneNumber
+        || row.order?.user?.phoneNumber
+        || row.user?.phoneNumber
+        || '';
+    const cleanPhone = String(phone).trim().replace(/[\s\-\+]/g, '');
+    const orderId = String(row.orderId || row.order?.id || row.order_id || '').trim();
+    const parcelId = String(row.parcelId || row.id || '').trim();
+    const userId = String(row.userId || row.user?.id || row.order?.user?.id || '').trim();
+    return { cleanPhone, orderId, parcelId, userId };
+}
+
+function filterRowsForDataGrid(rawRows, isHidePending, activeSearchRef = '') {
     if (!rawRows || !Array.isArray(rawRows)) return [];
     if (!isHidePending) return rawRows;
-    return rawRows.filter(r => !isPendingPaymentOrder(r));
+
+    const cleanSearch = activeSearchRef ? String(activeSearchRef).trim().replace(/[\s\-\+]/g, '') : '';
+    const pendingOrders = [];
+    const nonPendingOrders = [];
+
+    for (const row of rawRows) {
+        if (isPendingPaymentOrder(row)) {
+            pendingOrders.push(row);
+        } else {
+            nonPendingOrders.push(row);
+        }
+    }
+
+    const preservedPendingOrders = [];
+
+    if (cleanSearch) {
+        const matchingPending = [];
+        for (const row of pendingOrders) {
+            const refs = getRowReferences(row);
+            const matches = (refs.cleanPhone && refs.cleanPhone.includes(cleanSearch))
+                || (refs.orderId && refs.orderId === cleanSearch)
+                || (refs.parcelId && refs.parcelId === cleanSearch)
+                || (refs.userId && refs.userId === cleanSearch);
+            if (matches) {
+                matchingPending.push(row);
+            }
+        }
+        if (matchingPending.length > 0) {
+            preservedPendingOrders.push(matchingPending[0]);
+        }
+    } else {
+        const seenGroups = new Set();
+        for (const row of pendingOrders) {
+            const refs = getRowReferences(row);
+            const groupKey = refs.cleanPhone || refs.userId || refs.orderId || String(row.id);
+            if (!seenGroups.has(groupKey)) {
+                seenGroups.add(groupKey);
+                preservedPendingOrders.push(row);
+            }
+        }
+    }
+
+    const preservedPendingIds = new Set(preservedPendingOrders.map(r => r.id));
+    return rawRows.filter(r => !isPendingPaymentOrder(r) || preservedPendingIds.has(r.id));
 }
 
 describe('Settings & Status Filtering Regression Tests', () => {
@@ -79,49 +136,51 @@ describe('Settings & Status Filtering Regression Tests', () => {
     });
 
     describe('Required Regression Case: Phone 09179132236', () => {
+        const fixturePhone = '09179132236';
         const fixtureRows31 = [
             // 20 pending orders
-            ...Array.from({ length: 20 }, (_, i) => ({ id: 1480460 + i, state: 'PAYMENT_PENDING', order: { id: 1112700 + i } })),
+            ...Array.from({ length: 20 }, (_, i) => ({ id: 1480460 + i, state: 'PAYMENT_PENDING', userPhoneNumber: fixturePhone, order: { id: 1112700 + i } })),
             // 4 shipped orders for order 1126071
-            { id: 1499912, state: 'SELLER_SHIPPED', order: { id: 1126071 } },
-            { id: 1499911, state: 'SELLER_SHIPPED', order: { id: 1126071 } },
-            { id: 1499909, state: 'SELLER_SHIPPED', order: { id: 1126071 } },
-            { id: 1499910, state: 'SELLER_SHIPPED', order: { id: 1126071 } },
+            { id: 1499912, state: 'SELLER_SHIPPED', userPhoneNumber: fixturePhone, order: { id: 1126071 } },
+            { id: 1499911, state: 'SELLER_SHIPPED', userPhoneNumber: fixturePhone, order: { id: 1126071 } },
+            { id: 1499909, state: 'SELLER_SHIPPED', userPhoneNumber: fixturePhone, order: { id: 1126071 } },
+            { id: 1499910, state: 'SELLER_SHIPPED', userPhoneNumber: fixturePhone, order: { id: 1126071 } },
             // 6 more pending orders
-            ...Array.from({ length: 6 }, (_, i) => ({ id: 1529500 + i, state: 'PAYMENT_PENDING', order: { id: 1146400 + i } })),
+            ...Array.from({ length: 6 }, (_, i) => ({ id: 1529500 + i, state: 'PAYMENT_PENDING', userPhoneNumber: fixturePhone, order: { id: 1146400 + i } })),
             // 1 cancelled order 448720
-            { id: 539749, state: 'CANCELLED_ADMIN', order: { id: 448720 } }
+            { id: 539749, state: 'CANCELLED_ADMIN', userPhoneNumber: fixturePhone, order: { id: 448720 } }
         ];
 
-        test('with setting enabled: hides all pending orders and preserves all 5 non-pending orders', () => {
+        test('with setting enabled: preserves 1 eligible pending order and all 5 non-pending orders (total 6)', () => {
             assert.equal(fixtureRows31.length, 31);
-            const filtered = filterRowsForDataGrid(fixtureRows31, true);
+            const filtered = filterRowsForDataGrid(fixtureRows31, true, fixturePhone);
 
-            assert.equal(filtered.length, 5);
+            assert.equal(filtered.length, 6, 'Must preserve 5 non-pending + 1 eligible pending order');
             const ids = filtered.map(r => r.id);
-            assert.deepEqual(ids, [1499912, 1499911, 1499909, 1499910, 539749]);
+            assert.deepEqual(ids, [1480460, 1499912, 1499911, 1499909, 1499910, 539749]);
 
             // Verify order statuses
-            assert.equal(filtered[0].state, 'SELLER_SHIPPED');
+            assert.equal(filtered[0].state, 'PAYMENT_PENDING', 'Preserved order must be eligible pending');
             assert.equal(filtered[1].state, 'SELLER_SHIPPED');
             assert.equal(filtered[2].state, 'SELLER_SHIPPED');
             assert.equal(filtered[3].state, 'SELLER_SHIPPED');
-            assert.equal(filtered[4].state, 'CANCELLED_ADMIN');
+            assert.equal(filtered[4].state, 'SELLER_SHIPPED');
+            assert.equal(filtered[5].state, 'CANCELLED_ADMIN');
 
             // Verify order IDs
-            assert.equal(filtered[0].order.id, 1126071);
-            assert.equal(filtered[4].order.id, 448720);
+            assert.equal(filtered[1].order.id, 1126071);
+            assert.equal(filtered[5].order.id, 448720);
         });
 
         test('with setting disabled: retains all 31 orders without suppression', () => {
-            const unfiltered = filterRowsForDataGrid(fixtureRows31, false);
+            const unfiltered = filterRowsForDataGrid(fixtureRows31, false, fixturePhone);
             assert.equal(unfiltered.length, 31);
             assert.equal(unfiltered[0].id, 1480460);
             assert.equal(unfiltered[unfiltered.length - 1].id, 539749);
         });
 
         test('does NOT collapse or group other orders belonging to the customer', () => {
-            const filtered = filterRowsForDataGrid(fixtureRows31, true);
+            const filtered = filterRowsForDataGrid(fixtureRows31, true, fixturePhone);
             const shippedItems = filtered.filter(r => r.order.id === 1126071);
             assert.equal(shippedItems.length, 4, 'All 4 shipped parcel items must be preserved individually');
 

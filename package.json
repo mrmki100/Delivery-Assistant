@@ -1,0 +1,22 @@
+{
+  "name": "delivery-assistant",
+  "version": "19.0.0",
+  "description": "Delivery Assistant Chrome Extension (Manifest V3)",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "test:unit": "node --test tests/phone-extraction-and-association.test.mjs tests/settings-filtering-regression.test.mjs",
+    "test:integration": "node --test tests/chapar-lookup-flow.test.mjs tests/jira-integration-regression.test.mjs tests/chapar-jira-ui-parity.test.mjs",
+    "test:regression": "node --test tests/surgical-fixes-v19.test.mjs tests/pending-payment-preservation.test.mjs tests/chapar-auth-session-scenarios.test.mjs",
+    "gate": "node tests/quality-gate.mjs",
+    "quality-gate": "node tests/quality-gate.mjs"
+  },
+  "keywords": [
+    "chrome-extension",
+    "manifest-v3",
+    "delivery-assistant",
+    "testing"
+  ],
+  "author": "Delivery Assistant Team",
+  "license": "ISC"
+}

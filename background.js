@@ -228,36 +228,42 @@ async function executeControlledReload({ targetVersion, transactionId, source })
  * On service worker boot, verifies whether a pending update completed successfully,
  * clears pending state, and notifies the Native Messaging Host of active version.
  */
-async function checkStartupActivation() {
-    const currentVer = chrome.runtime.getManifest().version;
-    logDebug(`[Lifecycle] Service worker initialized. Running manifest version: v${currentVer}`);
+let startupActivationPromise = null;
+function checkStartupActivation() {
+    if (!startupActivationPromise) {
+        startupActivationPromise = (async () => {
+            const currentVer = chrome.runtime.getManifest().version;
+            logDebug(`[Lifecycle] Service worker initialized. Running manifest version: v${currentVer}`);
 
-    try {
-        const stored = await chrome.storage.local.get([PENDING_ACTIVATION_KEY, LAST_UPDATE_KEY]);
-        const pending = stored[PENDING_ACTIVATION_KEY];
+            try {
+                const stored = await chrome.storage.local.get([PENDING_ACTIVATION_KEY, LAST_UPDATE_KEY]);
+                const pending = stored[PENDING_ACTIVATION_KEY];
 
-        if (pending) {
-            if (pending.targetVersion === currentVer) {
-                logDebug(`[Lifecycle] VERIFIED: Target v${currentVer} is now active (tx: ${pending.transactionId})!`);
-                await chrome.storage.local.remove(PENDING_ACTIVATION_KEY);
-                await chrome.storage.local.set({
-                    [LAST_UPDATE_KEY]: {
-                        version: currentVer,
-                        transactionId: pending.transactionId,
-                        activatedAt: Date.now()
+                if (pending) {
+                    if (pending.targetVersion === currentVer) {
+                        logDebug(`[Lifecycle] VERIFIED: Target v${currentVer} is now active (tx: ${pending.transactionId})!`);
+                        await chrome.storage.local.remove(PENDING_ACTIVATION_KEY);
+                        await chrome.storage.local.set({
+                            [LAST_UPDATE_KEY]: {
+                                version: currentVer,
+                                transactionId: pending.transactionId,
+                                activatedAt: Date.now()
+                            }
+                        });
+                        reportRuntimeVersionToNative(currentVer, pending.transactionId);
+                    } else {
+                        logDebug(`[Lifecycle] Pending target was v${pending.targetVersion}, but running v${currentVer} (attempt: ${pending.reloadAttempts})`);
                     }
-                });
-                reportRuntimeVersionToNative(currentVer, pending.transactionId);
-            } else {
-                logDebug(`[Lifecycle] Pending target was v${pending.targetVersion}, but running v${currentVer} (attempt: ${pending.reloadAttempts})`);
+                } else {
+                    // Normal startup reporting
+                    reportRuntimeVersionToNative(currentVer);
+                }
+            } catch (e) {
+                logDebug(`[Lifecycle] Error checking activation: ${e.message}`);
             }
-        } else {
-            // Normal startup reporting
-            reportRuntimeVersionToNative(currentVer);
-        }
-    } catch (e) {
-        logDebug(`[Lifecycle] Error checking activation: ${e.message}`);
+        })();
     }
+    return startupActivationPromise;
 }
 
 function reportRuntimeVersionToNative(version, txId = '') {
@@ -284,12 +290,13 @@ function reportRuntimeVersionToNative(version, txId = '') {
 // ==========================================
 let nativePort = null;
 let nativeReconnectTimeout = null;
+let isInitializingBridge = false;
 
 function initNativeMessagingBridge() {
-    if (nativePort) {
-        try { nativePort.disconnect(); } catch (e) {}
-        nativePort = null;
+    if (nativePort || isInitializingBridge) {
+        return;
     }
+    isInitializingBridge = true;
 
     try {
         logDebug("[NativeBridge] Connecting to native host 'driver_update_assistant'...");
@@ -333,6 +340,8 @@ function initNativeMessagingBridge() {
     } catch (e) {
         logDebug(`[NativeBridge] Error initializing native bridge: ${e.message}`);
         nativePort = null;
+    } finally {
+        isInitializingBridge = false;
     }
 }
 
@@ -417,13 +426,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     }
 
-    if (message.action === 'CHECK_CHAPAR_AUTH') {
-        checkChaparAuthStatus(message.forceRefresh === true)
-            .then(res => sendResponse(res))
-            .catch(err => sendResponse({ success: false, state: 'PORTAL_UNAVAILABLE', error: err.message }));
-        return true;
-    }
-
     if (message.action === 'JIRA_SEARCH_TICKETS') {
         logDebug("Received JIRA_SEARCH_TICKETS from UI", { parcelId: message.parcelId, waybill: message.waybill });
         const opId = trackOperationStart('JIRA_SEARCH_TICKETS', { waybill: message.waybill, parcelId: message.parcelId });
@@ -447,6 +449,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         handleOpenJiraTab(message.url)
             .then(sendResponse)
             .catch(err => sendResponse({ success: false, error: err.message }))
+            .finally(() => trackOperationEnd(opId));
+        return true;
+    }
+
+    if (message.action === 'PREPARE_GOJIRA_ISSUE') {
+        const opId = trackOperationStart('PREPARE_GOJIRA_ISSUE', { trackingNumber: message.payload?.trackingNumber });
+        handlePrepareGojiraIssue(message.payload, false)
+            .then(sendResponse)
+            .catch(err => sendResponse({ success: false, error: 'GOJIRA_ERROR', message: err.message }))
+            .finally(() => trackOperationEnd(opId));
+        return true;
+    }
+
+    if (message.action === 'EXECUTE_AUTHORIZED_QA_TEST_ISSUE') {
+        const opId = trackOperationStart('EXECUTE_AUTHORIZED_QA_TEST_ISSUE', {});
+        handlePrepareGojiraIssue(message.payload, true)
+            .then(sendResponse)
+            .catch(err => sendResponse({ success: false, error: 'QA_ERROR', message: err.message }))
             .finally(() => trackOperationEnd(opId));
         return true;
     }
@@ -897,43 +917,6 @@ function checkDeliveryStatus(portalStatus, popupData, historyLogs) {
     };
 }
 
-function deriveDeliveryDate(orderData, historyLogs) {
-    // 1. Direct authoritative delivery_time field from Chapar API
-    if (orderData && orderData.delivery_time && typeof orderData.delivery_time === 'string') {
-        const dt = orderData.delivery_time.trim();
-        if (dt && dt !== '0000/00/00' && dt !== '0000/00/00 00:00:00' && dt !== '-' && !dt.startsWith('0000')) {
-            return {
-                isDelivered: true,
-                deliveryDate: dt,
-                deliveredTo: orderData.delivered_to || null,
-                source: 'api_delivery_time'
-            };
-        }
-    }
-
-    // 2. Verified delivery status event in history logs (exact match only - zero substring keyword guessing)
-    if (Array.isArray(historyLogs) && historyLogs.length > 0) {
-        for (const log of historyLogs) {
-            const st = String(log.status || '').trim();
-            if (st === 'سالم تحویل شد' || st.toUpperCase() === 'OK') {
-                return {
-                    isDelivered: true,
-                    deliveryDate: log.date || null,
-                    deliveredTo: log.receiver || orderData?.delivered_to || null,
-                    source: 'history_ok_event'
-                };
-            }
-        }
-    }
-
-    // 3. Not delivered yet
-    return {
-        isDelivered: false,
-        deliveryDate: null,
-        deliveredTo: null,
-        source: 'not_delivered'
-    };
-}
 
 /**
  * Classifies the shipment into verified states:
@@ -1265,7 +1248,9 @@ function analyzeChaparPortalAuth(res, text) {
     const hasAuthMarkers = body.includes('FormConsignmentHistory') || body.includes('tbl_cons') || body.includes('fld_Cons_No') ||
         body.includes('P=Operation') || body.includes('xajax_DoPHP') || body.includes('FormCons') ||
         body.includes('OpenConsHistory') || body.includes('P=Logout') || body.includes('خروج از سامانه') ||
-        body.includes('خروج از حساب') || body.includes('خوش آمدید') || body.includes('سطح دسترسی');
+        body.includes('خروج از حساب') || body.includes('خوش آمدید') || body.includes('سطح دسترسی') ||
+        body.includes('مانیفست') || body.includes('تک بارنامه') || body.includes('بارنامه ها') ||
+        /(?:>|\s)خروج(?:<|\s)/.test(body);
 
     if (hasAuthMarkers) {
         return { state: 'AUTHENTICATED' };
@@ -1379,19 +1364,21 @@ async function checkChaparAuthStatus(forceRefresh = false) {
     try {
         const tabs = await chrome.tabs.query({ url: "*://portal.chaparnet.com/*" });
         let hasAuthenticatedTab = false;
-        let allTabsAreLogin = tabs.length > 0;
+        let confirmedLoginTabs = 0;
+        let reachedTabs = 0;
 
         for (const tab of tabs) {
             if (tab.id) {
                 try {
                     const ping = await chrome.tabs.sendMessage(tab.id, { action: 'PING_PORTAL_SESSION' });
                     if (ping) {
+                        reachedTabs++;
                         if (ping.isAuthenticated) {
                             hasAuthenticatedTab = true;
                             break;
                         }
-                        if (!ping.isLoginPage) {
-                            allTabsAreLogin = false;
+                        if (ping.isLoginPage) {
+                            confirmedLoginTabs++;
                         }
                     }
                 } catch (_) {
@@ -1405,7 +1392,8 @@ async function checkChaparAuthStatus(forceRefresh = false) {
             return { success: true, state: 'AUTHENTICATED' };
         }
 
-        if (tabs.length > 0 && allTabsAreLogin) {
+        // Only declare NEEDS_LOGIN from tabs if we reached tabs AND every reached tab confirmed it is a login page
+        if (tabs.length > 0 && reachedTabs > 0 && confirmedLoginTabs === tabs.length) {
             cachedChaparAuthState = null;
             return {
                 success: false,
@@ -1629,8 +1617,20 @@ async function handleChaparFetch(data) {
                     return { success: false, error: 'AUTH_REQUIRED', message: sessionCheck.message };
                 }
                 searchJson = parseSloppyJSON(searchResult.text);
-                if (searchJson && searchJson.rows && searchJson.rows.length > 0 && searchJson.rows[0].id) {
-                    row = searchJson.rows[0];
+                if (searchJson && Array.isArray(searchJson.rows) && searchJson.rows.length > 0) {
+                    const cleanWb = waybill.trim();
+                    const wbSuffix = cleanWb.length > 10 ? cleanWb.slice(3) : null;
+                    const matchedRow = searchJson.rows.find(r => {
+                        if (!r || !r.id || !Array.isArray(r.cell)) return false;
+                        const cellWb = stripHtml(r.cell[2] || '').trim();
+                        if (!cellWb) return false;
+                        if (cellWb === cleanWb) return true;
+                        if (wbSuffix && (cellWb === wbSuffix || cellWb.endsWith(wbSuffix))) return true;
+                        return false;
+                    });
+                    if (matchedRow) {
+                        row = matchedRow;
+                    }
                 }
             }
 
@@ -2075,17 +2075,27 @@ async function handlePublicChaparTab(trackingNo) {
 async function handleChaparTab(internalId, waybill) {
     if (internalId || waybill) {
         await chrome.storage.local.set({ 
-            chaparTrackingTask: internalId,
-            chaparTrackingWaybill: waybill 
+            chaparTrackingTask: internalId || null,
+            chaparTrackingWaybill: waybill || null
         });
     }
     const tabs = await chrome.tabs.query({ url: "*://portal.chaparnet.com/*" });
     
     if (tabs.length > 0) {
-        await chrome.tabs.update(tabs[0].id, { active: true });
-        await chrome.windows.update(tabs[0].windowId, { focused: true });
-        if (internalId) {
-            await chrome.tabs.reload(tabs[0].id); 
+        const tab = tabs[0];
+        await chrome.tabs.update(tab.id, { active: true });
+        if (tab.windowId) {
+            await chrome.windows.update(tab.windowId, { focused: true });
+        }
+        // Ping tab to check responsiveness; only reload if unresponsive
+        try {
+            const pong = await chrome.tabs.sendMessage(tab.id, { action: 'PING_PORTAL_SESSION' });
+            if (!pong) {
+                await chrome.tabs.reload(tab.id);
+            }
+        } catch (e) {
+            // Tab is unresponsive (e.g. content script not loaded or discarded)
+            await chrome.tabs.reload(tab.id);
         }
     } else {
         await chrome.tabs.create({ url: "https://portal.chaparnet.com/index.php?P=Operation&Tab=Consignment" });
@@ -2305,5 +2315,111 @@ async function handleOpenJiraTab(rawUrl) {
     } catch (e) {
         return { success: false, error: e.message };
     }
+}
+
+/**
+ * Orchestrates Jira tab focus and issue preparation for GoJira.
+ * TAB ISOLATION INVARIANT:
+ * Every deliberate GoJira template action opens a NEW, dedicated Jira tab.
+ * Existing Jira tabs (including those with unfinished drafts) are NEVER reused,
+ * redirected, updated, reloaded, or mutated.
+ */
+async function handlePrepareGojiraIssue(payload, isLiveQATest = false) {
+    if (!payload || !payload.trackingNumber) {
+        return { success: false, error: 'MISSING_DATA', message: 'شماره مرسوله برای انتقال به GoJira ناموجود است.' };
+    }
+
+    const operationId = 'gojira_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    const targetUrl = `https://jira.automoby.ir/secure/Dashboard.jspa#gojira-op=${operationId}`;
+
+    // Always create a new isolated Jira tab for this workflow
+    const targetTab = await chrome.tabs.create({ url: targetUrl, active: true });
+
+    if (targetTab && targetTab.windowId) {
+        try {
+            await chrome.windows.update(targetTab.windowId, { focused: true });
+        } catch (_) {}
+    }
+
+    // Persist pending task scoped to this operation and target tab
+    const taskData = {
+        payload,
+        timestamp: Date.now(),
+        isLiveQATest,
+        operationId,
+        targetTabId: targetTab.id
+    };
+    await chrome.storage.local.set({
+        [`gojiraPendingTask_${operationId}`]: taskData,
+        gojiraPendingTask: taskData
+    });
+
+    // Wait for the new tab to complete loading before dispatching messages
+    await new Promise((resolve) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+            if (!settled) {
+                settled = true;
+                chrome.tabs.onUpdated.removeListener(onTabUpdated);
+                resolve();
+            }
+        }, 12000);
+
+        function onTabUpdated(tabId, changeInfo) {
+            if (tabId === targetTab.id && changeInfo.status === 'complete') {
+                if (!settled) {
+                    settled = true;
+                    clearTimeout(timer);
+                    chrome.tabs.onUpdated.removeListener(onTabUpdated);
+                    resolve();
+                }
+            }
+        }
+        chrome.tabs.onUpdated.addListener(onTabUpdated);
+
+        chrome.tabs.get(targetTab.id).then(tab => {
+            if (tab && tab.status === 'complete' && !settled) {
+                settled = true;
+                clearTimeout(timer);
+                chrome.tabs.onUpdated.removeListener(onTabUpdated);
+                resolve();
+            }
+        }).catch(() => {});
+    });
+
+    // Try direct tab message delivery targeted strictly to targetTab.id
+    const action = isLiveQATest ? 'EXECUTE_AUTHORIZED_QA_TEST_ISSUE' : 'PREPARE_GOJIRA_ISSUE';
+    try {
+        const response = await chrome.tabs.sendMessage(targetTab.id, { action, payload, operationId });
+        if (response && response.success) {
+            await chrome.storage.local.remove([`gojiraPendingTask_${operationId}`, 'gojiraPendingTask']);
+            return response;
+        }
+    } catch (e) {
+        logDebug("Direct tab message to new Jira tab timed out or tab loading, attempting injection/storage fallback:", e.message);
+        if (chrome.scripting && targetTab.id) {
+            try {
+                await chrome.scripting.executeScript({
+                    target: { tabId: targetTab.id },
+                    files: ['jira-assistant.js']
+                });
+                const retryResp = await chrome.tabs.sendMessage(targetTab.id, { action, payload, operationId });
+                if (retryResp && retryResp.success) {
+                    await chrome.storage.local.remove([`gojiraPendingTask_${operationId}`, 'gojiraPendingTask']);
+                    return retryResp;
+                }
+            } catch (injErr) {
+                logDebug("Script injection or retry notice:", injErr.message);
+            }
+        }
+    }
+
+    return {
+        success: true,
+        mode: 'TASK_QUEUED',
+        operationId,
+        tabId: targetTab.id,
+        message: 'در حال باز کردن و آماده‌سازی فرم تیکت در Jira...'
+    };
 }
 
