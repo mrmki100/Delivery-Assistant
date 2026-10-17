@@ -1,9 +1,0 @@
-{
-  "name": "driver_update_assistant",
-  "description": "Native Messaging Host for Delivery Assistant Extension",
-  "path": "C:\\Users\\mrmki\\Documents\\antiGG repo\\Delivery Assistant\\Driver and update assistant\\scripts\\host_runner.bat",
-  "type": "stdio",
-  "allowed_origins": [
-    "chrome-extension://ajbnjogoeehfjnjbpodgoihmcmooliom/"
-  ]
-}
